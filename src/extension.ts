@@ -54,7 +54,9 @@ export function activate(context: vscode.ExtensionContext): void {
     const cfg = readGenkouConfigFromVscode();
     const title = path.basename(doc.fileName, path.extname(doc.fileName));
     const html = generateManuscriptHtml(title, doc.getText(), cfg);
-    const outPath = `${doc.fileName}.genkou.html`;
+    const destination = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(`${doc.fileName}.genkou.html`), filters: { HTML: ['html'] } });
+    if (!destination) return;
+    const outPath = destination.fsPath;
     fs.writeFileSync(outPath, html, 'utf-8');
     await vscode.env.openExternal(vscode.Uri.file(outPath));
     void vscode.window.showInformationMessage(
@@ -85,7 +87,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const cfg = readGenkouConfigFromVscode();
     const html = generateManuscriptHtml(manifest.title, combinedText, cfg);
-    const outPath = path.join(root, `${manifest.title}.combined.genkou.html`);
+    const safeTitle = manifest.title.replace(/[\\/:*?\"<>|\x00-\x1f]/g, '_').replace(/^\.+$/, '_').trim() || 'manuscript';
+    const destination = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(root, `${safeTitle}.combined.genkou.html`)), filters: { HTML: ['html'] } });
+    if (!destination) return;
+    const outPath = destination.fsPath;
     fs.writeFileSync(outPath, html, 'utf-8');
     await vscode.env.openExternal(vscode.Uri.file(outPath));
     void vscode.window.showInformationMessage(
