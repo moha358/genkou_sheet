@@ -1,0 +1,14 @@
+.vscode/**
+.vscode-test/**
+.memory/**
+docs/**
+src/**
+test/**
+secrets/**
+node_modules/**
+.gitignore
+AGENTS.md
+tsconfig.json
+esbuild.js
+*.map
+*.vsix

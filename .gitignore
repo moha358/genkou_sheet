@@ -10,3 +10,6 @@ out/
 
 # AI Orchestration Persistent Memory (local workspace state)
 .memory/
+
+secrets/
+novel/

@@ -1,0 +1,227 @@
+{
+  "name": "genkou-sheet",
+  "displayName": "Genkou Sheet - 原稿用紙エディタ",
+  "description": "原稿用紙のマス目（緑・赤罫線、縦書き・横書き）に直接タイピングできる小説・文章執筆用VS Code拡張機能。対象フォルダー限定動作、ルビ・禁則処理、文字数・枚数カウント、原稿ツリー管理に対応。",
+  "version": "0.1.0",
+  "publisher": "moha358",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moha358/genkou_sheet.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Custom Editors",
+    "Other",
+    "Formatters"
+  ],
+  "keywords": [
+    "novel",
+    "japanese",
+    "vertical",
+    "genkou",
+    "原稿用紙",
+    "縦書き",
+    "小説",
+    "執筆"
+  ],
+  "icon": "assets/icon.png",
+  "activationEvents": [
+    "workspaceContains:.genkou.json",
+    "onCommand:genkouSheet.enableFolder",
+    "onCommand:genkouSheet.disableFolder",
+    "onCommand:genkouSheet.openAsGenkou",
+    "onCustomEditor:genkouSheet.editor"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "genkouSheet.editor",
+        "displayName": "原稿用紙エディタ (Genkou Sheet)",
+        "selector": [
+          {
+            "filenamePattern": "*.{txt,md}"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "genkouSheet.enableFolder",
+        "title": "Genkou: このフォルダーを執筆プロジェクトとして有効化"
+      },
+      {
+        "command": "genkouSheet.disableFolder",
+        "title": "Genkou: 執筆プロジェクト設定を解除"
+      },
+      {
+        "command": "genkouSheet.openAsGenkou",
+        "title": "Genkou: 原稿用紙エディタで開く"
+      },
+      {
+        "command": "genkouSheet.exportHtml",
+        "title": "Genkou: 現在の原稿を組版HTML / PDF印刷用に書き出し"
+      },
+      {
+        "command": "genkouSheet.exportCombinedHtml",
+        "title": "Genkou: 原稿ツリー全体を結合して組版HTML / PDF印刷用に書き出し"
+      },
+      {
+        "command": "genkouSheet.moveFileUp",
+        "title": "Genkou: 原稿の順序を上へ移動",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "genkouSheet.moveFileDown",
+        "title": "Genkou: 原稿の順序を下へ移動",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "genkouSheet.refreshTree",
+        "title": "Genkou: 原稿ツリーを更新",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "genkou-sheet-sidebar",
+          "title": "原稿用紙 (Genkou Sheet)",
+          "icon": "assets/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "genkou-sheet-sidebar": [
+        {
+          "id": "genkouSheet.manuscriptTree",
+          "name": "原稿ツリー (Manuscripts)",
+          "when": "genkouSheet.isFolderEnabled"
+        },
+        {
+          "id": "genkouSheet.welcomeView",
+          "name": "原稿用紙モード設定",
+          "when": "!genkouSheet.isFolderEnabled"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "genkouSheet.welcomeView",
+        "contents": "現在のフォルダーでは原稿用紙モードが無効です（他のプロジェクトには影響しません）。\n[このフォルダーを執筆プロジェクトとして有効化](command:genkouSheet.enableFolder)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "genkouSheet.refreshTree",
+          "when": "view == genkouSheet.manuscriptTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "genkouSheet.exportCombinedHtml",
+          "when": "view == genkouSheet.manuscriptTree",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "genkouSheet.moveFileUp",
+          "when": "view == genkouSheet.manuscriptTree && viewItem == manuscriptFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "genkouSheet.moveFileDown",
+          "when": "view == genkouSheet.manuscriptTree && viewItem == manuscriptFile",
+          "group": "inline@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Genkou Sheet (原稿用紙エディタ)",
+      "properties": {
+        "genkouSheet.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "window",
+          "description": "このワークスペースで原稿用紙モードを有効にするか"
+        },
+        "genkouSheet.writingMode": {
+          "type": "string",
+          "enum": [
+            "vertical-rl",
+            "horizontal-tb"
+          ],
+          "enumDescriptions": [
+            "縦書き（右から左へ進行）",
+            "横書き（左から右へ進行）"
+          ],
+          "default": "vertical-rl",
+          "scope": "window",
+          "description": "原稿用紙の書字方向"
+        },
+        "genkouSheet.gridColor": {
+          "type": "string",
+          "enum": [
+            "green",
+            "red",
+            "dark"
+          ],
+          "enumDescriptions": [
+            "緑罫線（コクヨ風）",
+            "赤・セピア罫線（丸善・文豪風）",
+            "ダークモード（暗色背景＋低コントラスト緑罫線）"
+          ],
+          "default": "green",
+          "scope": "window",
+          "description": "原稿用紙の罫線カラーテーマ"
+        },
+        "genkouSheet.charsPerLine": {
+          "type": "number",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 100,
+          "scope": "window",
+          "description": "1行あたりのマス数（文字数）"
+        },
+        "genkouSheet.linesPerPage": {
+          "type": "number",
+          "default": 20,
+          "minimum": 4,
+          "maximum": 100,
+          "scope": "window",
+          "description": "1ページあたりの行数"
+        },
+        "genkouSheet.autoIndent": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "段落改行（Enter）時に行頭へ全角スペースを自動挿入するか"
+        },
+        "genkouSheet.highlightDialogue": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "会話文（「…」『…』）をハイライト表示するか"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc --noEmit && node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "build": "tsc --noEmit && node esbuild.js --production",
+    "test": "node --import tsx --test test/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
