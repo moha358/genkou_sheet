@@ -67,6 +67,7 @@ export interface ColorPaletteTokens {
   toolbarBg: string;
   toolbarBorder: string;
   accentColor: string;
+  diffChangedBg: string;
 }
 
 export interface TypographyTokens {
@@ -118,6 +119,7 @@ export const COLOR_PALETTES: Record<GridColorTheme, ColorPaletteTokens> = {
     toolbarBg: '#f6f4ec',
     toolbarBorder: '#d5d0c3',
     accentColor: '#2d7a56',
+    diffChangedBg: 'rgba(214, 158, 46, 0.24)',
   },
   red: {
     paperBg: '#fcf9f2',
@@ -134,6 +136,7 @@ export const COLOR_PALETTES: Record<GridColorTheme, ColorPaletteTokens> = {
     toolbarBg: '#f5efe4',
     toolbarBorder: '#d8cbb8',
     accentColor: '#a63c2c',
+    diffChangedBg: 'rgba(196, 140, 30, 0.24)',
   },
   dark: {
     paperBg: '#1b2021',
@@ -150,6 +153,7 @@ export const COLOR_PALETTES: Record<GridColorTheme, ColorPaletteTokens> = {
     toolbarBg: '#161a1b',
     toolbarBorder: '#2b3537',
     accentColor: '#52a886',
+    diffChangedBg: 'rgba(230, 180, 80, 0.22)',
   },
 };
 
@@ -206,6 +210,7 @@ export function buildCssVariables(config: GenkouConfig): string {
     `--genkou-toolbar-bg: ${palette.toolbarBg};`,
     `--genkou-toolbar-border: ${palette.toolbarBorder};`,
     `--genkou-accent-color: ${palette.accentColor};`,
+    `--genkou-diff-changed-bg: ${palette.diffChangedBg};`,
     `--genkou-font-family: ${TYPOGRAPHY_TOKENS.fontFamily};`,
     `--genkou-ui-font-family: ${TYPOGRAPHY_TOKENS.uiFontFamily};`,
     `--genkou-cell-font-size: ${TYPOGRAPHY_TOKENS.cellFontSize};`,
@@ -273,3 +278,28 @@ export type WebviewToHostMessage =
       type: 'REQUEST_EXPORT';
       format: 'html' | 'combined';
     };
+
+/**
+ * 比較画面（原稿用紙2枚の並列表示） Host ⇔ Webview メッセージングプロトコル
+ */
+export interface ComparePaneData {
+  /** 見出し（例: 「バックアップ」「現在の原稿」） */
+  label: string;
+  /** 補足（例: バックアップの日時） */
+  detail: string;
+  text: string;
+  /** 「こちらを採用」ボタンの文言 */
+  adoptLabel: string;
+}
+
+export type CompareHostToWebviewMessage = {
+  type: 'INIT_COMPARE';
+  config: GenkouConfig;
+  fileName: string;
+  left: ComparePaneData;
+  right: ComparePaneData;
+};
+
+export type CompareWebviewToHostMessage =
+  | { type: 'COMPARE_READY' }
+  | { type: 'ADOPT'; side: 'left' | 'right' };

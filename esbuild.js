@@ -43,16 +43,31 @@ async function main() {
     logLevel: 'info',
   });
 
+  const compareCtx = await esbuild.context({
+    entryPoints: ['src/webview/compare.ts'],
+    bundle: true,
+    format: 'iife',
+    minify: production,
+    sourcemap: !production,
+    sourcesContent: false,
+    platform: 'browser',
+    outfile: 'dist/compare.js',
+    logLevel: 'info',
+  });
+
   copyCss();
 
   if (watch) {
     await extCtx.watch();
     await webviewCtx.watch();
+    await compareCtx.watch();
   } else {
     await extCtx.rebuild();
     await webviewCtx.rebuild();
+    await compareCtx.rebuild();
     await extCtx.dispose();
     await webviewCtx.dispose();
+    await compareCtx.dispose();
   }
 }
 

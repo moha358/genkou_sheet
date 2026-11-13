@@ -32,6 +32,13 @@ export interface SheetViewCallbacks {
   ) => void;
 }
 
+export interface SheetRenderOptions {
+  /** 比較画面など、カーソル表示とマウス操作を無効にする */
+  readOnly?: boolean;
+  /** 差分として強調表示する段落番号（paragraphIndex） */
+  changedParagraphs?: ReadonlySet<number>;
+}
+
 export class GenkouSheetRenderer {
   private readonly viewport: HTMLElement;
   private activeCellEl: HTMLElement | null = null;
@@ -64,7 +71,8 @@ export class GenkouSheetRenderer {
     config: GenkouConfig,
     cursorCoords: CellCoordinates,
     selectionAnchorCoords: CellCoordinates | null,
-    fileName: string
+    fileName: string,
+    options: SheetRenderOptions = {}
   ): void {
     this.pageObserver?.disconnect();
     const oldScrollTop = this.viewport.scrollTop;
@@ -97,7 +105,8 @@ export class GenkouSheetRenderer {
           config,
           cursorCoords,
           selectionAnchorCoords,
-          activeRubyGroupStart
+          activeRubyGroupStart,
+          options
         )
       );
 
@@ -130,7 +139,8 @@ export class GenkouSheetRenderer {
           config,
           cursorCoords,
           selectionAnchorCoords,
-          activeRubyGroupStart
+          activeRubyGroupStart,
+          options
         )
       );
 
@@ -171,7 +181,8 @@ export class GenkouSheetRenderer {
     config: GenkouConfig,
     cursorCoords: CellCoordinates,
     selectionAnchorCoords: CellCoordinates | null,
-    activeRubyGroupStart: number | undefined
+    activeRubyGroupStart: number | undefined,
+    options: SheetRenderOptions
   ): HTMLElement {
     const halfEl = document.createElement('div');
     halfEl.className = 'genkou-half';
@@ -184,6 +195,7 @@ export class GenkouSheetRenderer {
       const lineEl = document.createElement('div');
       lineEl.className = 'genkou-line';
       lineEl.dataset.globalLine = String(line.globalLineIndex);
+      const isChangedLine = options.changedParagraphs?.has(line.paragraphIndex) ?? false;
 
       for (const cell of line.cells) {
         const cellEl = document.createElement('div');
@@ -200,7 +212,11 @@ export class GenkouSheetRenderer {
           line.globalLineIndex === cursorCoords.globalLineIndex &&
           cell.cellIndex === cursorCoords.cellIndex;
 
-        if (isCursor) {
+        if (isChangedLine) {
+          cellEl.classList.add('is-diff-changed');
+        }
+
+        if (isCursor && !options.readOnly) {
           cellEl.classList.add('is-cursor');
           this.activeCellEl = cellEl;
         }
@@ -247,6 +263,11 @@ export class GenkouSheetRenderer {
           hangSpan.className = 'genkou-hanging';
           hangSpan.textContent = cell.hangingTokens.map((t) => t.char).join('');
           cellEl.appendChild(hangSpan);
+        }
+
+        if (options.readOnly) {
+          lineEl.appendChild(cellEl);
+          continue;
         }
 
         cellEl.addEventListener('mousedown', (e) => {

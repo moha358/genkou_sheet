@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+  buildWebviewHtml,
   GenkouEditorProvider,
   readGenkouConfigFromVscode,
 } from './providers/genkouEditorProvider';
@@ -14,6 +15,7 @@ import {
   ManuscriptTreeProvider,
 } from './providers/manuscriptTreeProvider';
 import { StatusBarCounterProvider } from './providers/statusBarProvider';
+import { CompareHostToWebviewMessage, CompareWebviewToHostMessage } from './core/theme';
 import { BackupSnapshot, BackupStore, matchesSavedFile } from './services/backupService';
 import { generateManuscriptHtml } from './services/exportService';
 import {
@@ -166,14 +168,14 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /** 原稿をバックアップの内容に置き換える（Undo 可能。置き換え前の内容も新しい世代として退避する） */
-  const restoreSnapshotText = async (target: vscode.Uri, text: string, displayName: string) => {
+  const restoreSnapshotText = async (target: vscode.Uri, text: string, displayName: string): Promise<boolean> => {
     const doc = await vscode.workspace.openTextDocument(target);
     backupNow(doc, true);
     const edit = new vscode.WorkspaceEdit();
     edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text);
-    if (await vscode.workspace.applyEdit(edit)) {
-      void vscode.window.showInformationMessage(`「${displayName}」をバックアップの内容に戻しました。確認後に保存してください。`);
-    }
+    if (!(await vscode.workspace.applyEdit(edit))) return false;
+    void vscode.window.showInformationMessage(`「${displayName}」をバックアップの内容に戻しました。確認後に保存してください。`);
+    return true;
   };
 
   interface BackupDiffInfo {
@@ -222,6 +224,57 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     await applyBackup(diff);
+  };
+
+  /**
+   * バックアップと現在の原稿を、原稿用紙2枚の並列表示で比較する。
+   * 左右は連動してスクロールし、各ペインの「こちらを採用」で結果を確定する。
+   */
+  const openComparePanel = (info: { target: vscode.Uri; displayName: string; backupText: string; backupTime: number; currentText: string }) => {
+    const panel = vscode.window.createWebviewPanel(
+      'genkouSheet.compare',
+      `${info.displayName}（バックアップと比較）`,
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist')],
+      }
+    );
+    panel.webview.html = buildWebviewHtml(panel.webview, context.extensionUri, 'compare.js', 'バックアップと比較');
+    const message: CompareHostToWebviewMessage = {
+      type: 'INIT_COMPARE',
+      config: readGenkouConfigFromVscode(),
+      fileName: info.displayName,
+      left: {
+        label: 'バックアップ',
+        detail: new Date(info.backupTime).toLocaleString('ja-JP'),
+        text: info.backupText,
+        adoptLabel: 'こちら（バックアップ）を採用',
+      },
+      right: {
+        label: '現在の原稿',
+        detail: '比較を開いた時点',
+        text: info.currentText,
+        adoptLabel: 'こちら（現在の原稿）を採用',
+      },
+    };
+    panel.webview.onDidReceiveMessage(async (msg: CompareWebviewToHostMessage) => {
+      if (msg.type === 'COMPARE_READY') {
+        void panel.webview.postMessage(message);
+      } else if (msg.type === 'ADOPT') {
+        if (msg.side === 'right') {
+          panel.dispose();
+          void vscode.window.showInformationMessage(`「${info.displayName}」は現在の内容のまま変更していません。`);
+          return;
+        }
+        try {
+          if (await restoreSnapshotText(info.target, info.backupText, info.displayName)) panel.dispose();
+        } catch (err) {
+          void vscode.window.showErrorMessage(`バックアップを復元できませんでした: ${errorMessage(err)}`);
+        }
+      }
+    });
   };
 
   const restoreBackup = async () => {
@@ -292,7 +345,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const actions = [
       ...(targetExists
         ? [
-            { label: '$(diff) 現在の原稿との差分を表示', id: 'diff' as const },
+            { label: '$(book) 原稿用紙で比較して、どちらかを採用', description: '左右連動・変更のある段落を強調', id: 'compare' as const },
+            { label: '$(diff) テキストの差分を表示', id: 'diff' as const },
             { label: '$(discard) 原稿をこの内容に戻す', description: '元に戻す (Undo) で取り消せます', id: 'restore' as const },
           ]
         : []),
@@ -302,7 +356,15 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!action) return;
 
     try {
-      if (action.id === 'diff') {
+      if (action.id === 'compare') {
+        openComparePanel({
+          target,
+          displayName,
+          backupText: pickedSnapshot.text,
+          backupTime: pickedSnapshot.snapshot.updatedAt,
+          currentText: currentText ?? '',
+        });
+      } else if (action.id === 'diff') {
         if (pickedSnapshot.text === currentText) {
           void vscode.window.showInformationMessage('このバックアップは現在の原稿と同じ内容です。より古い日時のバックアップを選ぶと差分を確認できます。');
           return;

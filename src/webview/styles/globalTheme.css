@@ -431,3 +431,50 @@ body {
   justify-content: flex-end;
   gap: var(--genkou-spacing-sm);
 }
+
+/* ── バックアップ比較画面（原稿用紙2枚の並列表示） ── */
+.genkou-compare-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.genkou-compare-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.genkou-compare-pane + .genkou-compare-pane {
+  border-left: var(--genkou-outer-border-width) solid var(--genkou-toolbar-border);
+}
+
+.genkou-compare-pane-header {
+  min-height: var(--genkou-toolbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--genkou-spacing-sm);
+  flex-wrap: wrap;
+  padding: var(--genkou-spacing-xs) var(--genkou-spacing-md);
+  background-color: var(--genkou-toolbar-bg);
+  border-bottom: var(--genkou-inner-border-width) solid var(--genkou-toolbar-border);
+  font-family: var(--genkou-ui-font-family);
+  font-size: var(--genkou-toolbar-font-size);
+}
+
+.genkou-compare-pane-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--genkou-spacing-xs);
+  min-width: 0;
+}
+
+.genkou-compare-pane-detail {
+  color: var(--genkou-text-muted);
+}
+
+.genkou-cell.is-diff-changed {
+  background-color: var(--genkou-diff-changed-bg);
+}

@@ -44,6 +44,7 @@ test('bundled extension activates and registers the enable command', () => {
     extension.activate({ subscriptions: [], globalStorageUri: { fsPath: require('node:os').tmpdir() } });
     assert.equal(typeof commands.get('genkouSheet.restoreBackup'), 'function');
     assert.equal(typeof commands.get('genkouSheet.applyBackupInDiff'), 'function');
+    assert.ok(require('node:fs').existsSync(path.resolve(__dirname, '../../dist/compare.js')));
     assert.equal(typeof commands.get('genkouSheet.enableFolder'), 'function');
   } finally {
     Module._load = originalLoad;

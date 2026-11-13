@@ -214,27 +214,36 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   private getHtmlForWebview(webview: vscode.Webview): string {
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js')
-    );
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'globalTheme.css')
-    );
-    const nonce = crypto.randomBytes(16).toString('base64');
+    return buildWebviewHtml(webview, this.context.extensionUri, 'webview.js', 'Genkou Sheet');
+  }
+}
 
-    return `<!DOCTYPE html>
+/**
+ * 原稿用紙 Webview 共通の HTML を生成する（nonce 付き CSP・外部通信なし）
+ */
+export function buildWebviewHtml(
+  webview: vscode.Webview,
+  extensionUri: vscode.Uri,
+  scriptFile: string,
+  title: string
+): string {
+  const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', scriptFile));
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'globalTheme.css'));
+  const nonce = crypto.randomBytes(16).toString('base64');
+  const safeTitle = title.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+  return `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource};" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="${styleUri}" />
-  <title>Genkou Sheet</title>
+  <title>${safeTitle}</title>
 </head>
 <body>
   <div id="genkou-root" class="genkou-app"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
-  }
 }

@@ -68,6 +68,7 @@ genkou_sheet/
 │   │   ├── layoutEngine.ts          # マス目割り付け・禁則処理・枚数計算エンジン
 │   │   ├── counter.ts               # 文字数・原稿用紙換算カウントロジック
 │   │   ├── textDiff.ts              # Webview 編集の最小置換範囲計算
+│   │   ├── paragraphDiff.ts         # バックアップ比較用の段落単位差分
 │   │   └── theme.ts                 # グローバルテーマ定義（Design Tokens）・設定値の正規化
 │   ├── providers/                   # VS Code API 連携層
 │   │   ├── genkouEditorProvider.ts  # CustomTextEditorProvider 実装
@@ -79,6 +80,7 @@ genkou_sheet/
 │   │   └── exportService.ts         # HTML / PDF 組版出力サービス
 │   └── webview/                     # Webview フロントエンド実装
 │       ├── index.ts                 # Webview エントリ
+│       ├── compare.ts               # バックアップ比較画面（原稿用紙2枚）エントリ
 │       ├── components/              # 疎結合UIコンポーネント群
 │       │   ├── Toolbar.ts           # 上部ツールバー
 │       │   ├── GenkouPage.ts        # 原稿用紙1ページ（20×20・柱・魚尾）描画
@@ -133,6 +135,11 @@ genkou_sheet/
 * `UPDATE_CONFIG`: `{ type: 'UPDATE_CONFIG', partialConfig: Partial<GenkouConfig> }`
 * `REQUEST_EXPORT`: `{ type: 'REQUEST_EXPORT', format: 'html' | 'combined' }`
 
+### 比較画面 (`CompareHostToWebviewMessage` / `CompareWebviewToHostMessage`)
+* Host → Webview `INIT_COMPARE`: `{ type: 'INIT_COMPARE', config: GenkouConfig, fileName: string, left: ComparePaneData, right: ComparePaneData }`（`ComparePaneData` = `{ label, detail, text, adoptLabel }`）
+* Webview → Host `COMPARE_READY`: `{ type: 'COMPARE_READY' }`
+* Webview → Host `ADOPT`: `{ type: 'ADOPT', side: 'left' | 'right' }`
+
 ### 通信上の規約
 * Webview 側の `text` は常に改行コード LF で扱う。CRLF の文書では Host が送信時に LF へ、受信時に CRLF へ変換する。
 * Host は `EDIT_TEXT` の全文と現在の文書を比較し（`core/textDiff.ts`）、変更範囲だけを `WorkspaceEdit` で置換する。
@@ -148,7 +155,8 @@ genkou_sheet/
 * タイミング: 最後の変更から 1.5 秒後、保存時、文書を閉じた時、拡張機能の終了時。直前の世代と同じ内容、およびディスク上の保存済み内容と同じテキストは書き込まない（「保存しない」で閉じた際の revert で未保存の世代を上書きしないため。復元直前の退避は例外として必ず書く）。
 * 世代: 最新世代の作成から `genkouSheet.backup.intervalMinutes`（既定 5 分）以内の変更は最新世代を上書きし、それを過ぎたら新しい世代を作る。`genkouSheet.backup.maxSnapshots`（既定 50）を超えた古い世代は削除する。書き込みは一時ファイルからの rename で行う。
 * 復元: `genkouSheet.restoreBackup` で世代を選び、読み取り専用の差分表示（`genkou-backup:` スキーム）・Undo 可能な置換（置換前の内容を新しい世代として退避）・新規タブへの展開を選べる。
-* 差分表示: 左右とも読み取り専用の `genkou-backup:` 文書で開く（左 `/<key>/<作成時刻ms>` がバックアップ、右 `/current/<連番>` が差分を開いた時点の原稿で、メモリ上に保持し閉じたら破棄）。パスを `.txt` / `.md` で終わらせないことで、執筆フォルダーの `workbench.editorAssociations` が適用されず、必ずテキスト差分になる。query に復元先の原稿 URI（`target`）と表示名（`name`）を持つ。
+* 原稿用紙での比較: `genkouSheet.compare` の WebviewPanel（`dist/compare.js`、エントリ `src/webview/compare.ts`）で、左にバックアップ、右に比較を開いた時点の原稿を `GenkouSheetRenderer` の読み取り専用モードで描画する。左右のスクロールは連動し、`core/paragraphDiff.ts` の段落単位 LCS 差分で変更段落を `is-diff-changed`（`--genkou-diff-changed-bg`）で強調する。各ペインの採用ボタンは `ADOPT` を送り、左（バックアップ）なら確認なしで Undo 可能な全文置換（置換前の内容を退避）を行ってパネルを閉じ、右なら変更せずに閉じる。
+* テキスト差分表示: 左右とも読み取り専用の `genkou-backup:` 文書で開く（左 `/<key>/<作成時刻ms>` がバックアップ、右 `/current/<連番>` が差分を開いた時点の原稿で、メモリ上に保持し閉じたら破棄）。パスを `.txt` / `.md` で終わらせないことで、執筆フォルダーの `workbench.editorAssociations` が適用されず、必ずテキスト差分になる。query に復元先の原稿 URI（`target`）と表示名（`name`）を持つ。
 * 差分画面での復元: 差分を開いた際の通知のボタン、またはエディタタイトルの `genkouSheet.applyBackupInDiff`（左側が `genkou-backup:` の差分がアクティブなとき context key `genkouSheet.backupDiffActive` で表示）から、確認ダイアログ後に `target` の原稿を全文置換する。
 
 ---
