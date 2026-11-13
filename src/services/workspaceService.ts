@@ -5,6 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { applyEdits, modify, parse, ParseError } from 'jsonc-parser';
 import { DEFAULT_GENKOU_CONFIG, GenkouConfig } from '../core/theme';
 
 export const GENKOU_PROJECT_FILE = '.genkou.json';
@@ -15,6 +16,8 @@ export interface GenkouProjectManifest {
   title: string;
   files: string[];
   config?: Partial<GenkouConfig>;
+  enabled?: boolean;
+  previousSettings?: { enabled?: unknown; associations: Record<string, unknown> };
 }
 
 const IGNORED_DIRS = new Set([
@@ -41,13 +44,13 @@ const IGNORED_FILES = new Set([
 export function isFolderGenkouEnabled(workspaceRoot: string): boolean {
   const manifestPath = path.join(workspaceRoot, GENKOU_PROJECT_FILE);
   if (fs.existsSync(manifestPath)) {
-    return true;
+    return readProjectManifest(workspaceRoot).enabled !== false;
   }
   const settingsPath = path.join(workspaceRoot, '.vscode', 'settings.json');
   if (fs.existsSync(settingsPath)) {
     try {
       const raw = fs.readFileSync(settingsPath, 'utf-8');
-      const parsed = JSON.parse(raw);
+      const parsed = parse(raw);
       return Boolean(parsed['genkouSheet.enabled']);
     } catch {
       return false;
@@ -105,9 +108,11 @@ export function readProjectManifest(workspaceRoot: string): GenkouProjectManifes
       const data = JSON.parse(raw) as Partial<GenkouProjectManifest>;
       return {
         version: data.version ?? 1,
-        title: data.title ?? defaultTitle,
+        title: typeof data.title === 'string' ? data.title : defaultTitle,
         files: Array.isArray(data.files) ? data.files : [],
         config: data.config ?? {},
+        enabled: data.enabled,
+        previousSettings: data.previousSettings,
       };
     } catch {
       // パース失敗時はフォールバック
@@ -198,95 +203,71 @@ export function moveManuscriptFileOrder(
  * 対象フォルダーを原稿執筆プロジェクトとして有効化する
  * (.vscode/settings.json の workbench.editorAssociations と .genkou.json を構成)
  */
-export function enableGenkouInFolder(workspaceRoot: string): void {
-  const vscodeDir = path.join(workspaceRoot, '.vscode');
-  if (!fs.existsSync(vscodeDir)) {
-    fs.mkdirSync(vscodeDir, { recursive: true });
+function readSettings(settingsPath: string): { text: string; settings: Record<string, unknown> } {
+  const text = fs.existsSync(settingsPath) ? fs.readFileSync(settingsPath, 'utf-8') : '{}';
+  const errors: ParseError[] = [];
+  const settings: unknown = parse(text, errors, { allowTrailingComma: true });
+  if (errors.length || !settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    throw new Error('settings.json を読み取れません。設定ファイルを修正してから再実行してください。');
   }
-
-  const settingsPath = path.join(vscodeDir, 'settings.json');
-  let settings: Record<string, unknown> = {};
-  if (fs.existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    } catch {
-      settings = {};
-    }
-  }
-
-  const existingAssociations =
-    typeof settings['workbench.editorAssociations'] === 'object' &&
-    settings['workbench.editorAssociations'] !== null
-      ? (settings['workbench.editorAssociations'] as Record<string, string>)
-      : {};
-
-  settings['genkouSheet.enabled'] = true;
-  settings['workbench.editorAssociations'] = {
-    ...existingAssociations,
-    '*.txt': EDITOR_VIEW_TYPE,
-    '*.md': EDITOR_VIEW_TYPE,
-  };
-
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-
-  // .genkou.json が未作成なら初期生成する
-  const manifestPath = path.join(workspaceRoot, GENKOU_PROJECT_FILE);
-  if (!fs.existsSync(manifestPath)) {
-    const files = scanManuscriptFiles(workspaceRoot);
-    writeProjectManifest(workspaceRoot, {
-      version: 1,
-      title: path.basename(workspaceRoot),
-      files,
-      config: {
-        writingMode: DEFAULT_GENKOU_CONFIG.writingMode,
-        gridColor: DEFAULT_GENKOU_CONFIG.gridColor,
-        charsPerLine: DEFAULT_GENKOU_CONFIG.charsPerLine,
-        linesPerPage: DEFAULT_GENKOU_CONFIG.linesPerPage,
-      },
-    });
-  }
+  return { text, settings: settings as Record<string, unknown> };
 }
 
-/**
- * 対象フォルダーの原稿執筆プロジェクト設定を解除する
- */
+function updateSetting(text: string, key: string, value: unknown): string {
+  return applyEdits(text, modify(text, [key], value, {
+    formattingOptions: { insertSpaces: true, tabSize: 2 },
+  }));
+}
+
+export function enableGenkouInFolder(workspaceRoot: string): void {
+  const vscodeDir = path.join(workspaceRoot, '.vscode');
+  const settingsPath = path.join(vscodeDir, 'settings.json');
+  const { text, settings } = readSettings(settingsPath);
+  const manifestPath = path.join(workspaceRoot, GENKOU_PROJECT_FILE);
+  const manifest = readProjectManifest(workspaceRoot);
+  const associations = settings['workbench.editorAssociations'];
+  if (associations !== undefined && (!associations || typeof associations !== 'object' || Array.isArray(associations))) {
+    throw new Error('workbench.editorAssociations の形式を確認してください。');
+  }
+  const existing = (associations ?? {}) as Record<string, unknown>;
+  if (!manifest.previousSettings) {
+    const previous: Record<string, unknown> = {};
+    for (const key of ['*.txt', '*.md']) {
+      if (Object.hasOwn(existing, key)) previous[key] = existing[key];
+    }
+    manifest.previousSettings = { enabled: settings['genkouSheet.enabled'], associations: previous };
+  }
+  if (!fs.existsSync(manifestPath)) manifest.files = scanManuscriptFiles(workspaceRoot);
+  manifest.enabled = true;
+  const nextAssociations = { ...existing, '*.txt': EDITOR_VIEW_TYPE, '*.md': EDITOR_VIEW_TYPE };
+  const updated = updateSetting(updateSetting(text, 'genkouSheet.enabled', true), 'workbench.editorAssociations', nextAssociations);
+  fs.mkdirSync(vscodeDir, { recursive: true });
+  writeProjectManifest(workspaceRoot, manifest);
+  fs.writeFileSync(settingsPath, updated, 'utf-8');
+}
+
 export function disableGenkouInFolder(workspaceRoot: string): void {
   const settingsPath = path.join(workspaceRoot, '.vscode', 'settings.json');
+  const manifest = readProjectManifest(workspaceRoot);
   if (fs.existsSync(settingsPath)) {
-    try {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as Record<
-        string,
-        unknown
-      >;
-      settings['genkouSheet.enabled'] = false;
-
-      if (
-        typeof settings['workbench.editorAssociations'] === 'object' &&
-        settings['workbench.editorAssociations'] !== null
-      ) {
-        const assoc = {
-          ...(settings['workbench.editorAssociations'] as Record<string, string>),
-        };
-        if (assoc['*.txt'] === EDITOR_VIEW_TYPE) {
-          delete assoc['*.txt'];
-        }
-        if (assoc['*.md'] === EDITOR_VIEW_TYPE) {
-          delete assoc['*.md'];
-        }
-        if (Object.keys(assoc).length === 0) {
-          delete settings['workbench.editorAssociations'];
-        } else {
-          settings['workbench.editorAssociations'] = assoc;
-        }
-      }
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    } catch {
-      // ignore
+    const { text, settings } = readSettings(settingsPath);
+    const current = settings['workbench.editorAssociations'];
+    if (current !== undefined && (!current || typeof current !== 'object' || Array.isArray(current))) {
+      throw new Error('workbench.editorAssociations の形式を確認してください。');
     }
+    const associations = { ...(current as Record<string, unknown> | undefined) };
+    for (const key of ['*.txt', '*.md']) {
+      if (associations[key] === EDITOR_VIEW_TYPE) {
+        if (manifest.previousSettings && Object.hasOwn(manifest.previousSettings.associations, key)) {
+          associations[key] = manifest.previousSettings.associations[key];
+        } else delete associations[key];
+      }
+    }
+    const enabled = settings['genkouSheet.enabled'] === true ? manifest.previousSettings?.enabled : settings['genkouSheet.enabled'];
+    const updated = updateSetting(updateSetting(text, 'genkouSheet.enabled', enabled), 'workbench.editorAssociations', Object.keys(associations).length ? associations : undefined);
+    fs.writeFileSync(settingsPath, updated, 'utf-8');
   }
-
-  const manifestPath = path.join(workspaceRoot, GENKOU_PROJECT_FILE);
-  if (fs.existsSync(manifestPath)) {
-    fs.unlinkSync(manifestPath);
-  }
+  manifest.enabled = false;
+  delete manifest.previousSettings;
+  writeProjectManifest(workspaceRoot, manifest);
 }

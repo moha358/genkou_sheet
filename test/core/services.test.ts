@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { parse } from 'jsonc-parser';
 import {
   enableGenkouInFolder,
   disableGenkouInFolder,
@@ -25,6 +26,33 @@ describe('WorkspaceService (対象フォルダー限定の有効化・解除・�
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('コメント付き設定と既存の関連付けを有効化・解除後も保持する', () => {
+    const dir = path.join(tempDir, '.vscode');
+    fs.mkdirSync(dir);
+    const settingsPath = path.join(dir, 'settings.json');
+    fs.writeFileSync(settingsPath, '{\n  // ユーザー設定\n  "editor.tabSize": 4,\n  "workbench.editorAssociations": { "*.txt": "other.editor", "*.log": "log.editor" },\n}');
+    enableGenkouInFolder(tempDir);
+    const enabled = fs.readFileSync(settingsPath, 'utf-8');
+    assert.ok(enabled.includes('// ユーザー設定'));
+    assert.equal(parse(enabled)['workbench.editorAssociations']['*.txt'], 'genkouSheet.editor');
+    disableGenkouInFolder(tempDir);
+    const restored = fs.readFileSync(settingsPath, 'utf-8');
+    assert.ok(restored.includes('// ユーザー設定'));
+    assert.equal(parse(restored)['editor.tabSize'], 4);
+    assert.deepEqual(parse(restored)['workbench.editorAssociations'], { '*.txt': 'other.editor', '*.log': 'log.editor' });
+    assert.equal(isFolderGenkouEnabled(tempDir), false);
+  });
+
+  it('不正な設定ファイルを上書きしない', () => {
+    const dir = path.join(tempDir, '.vscode');
+    fs.mkdirSync(dir);
+    const settingsPath = path.join(dir, 'settings.json');
+    const original = '{ "editor.tabSize": ';
+    fs.writeFileSync(settingsPath, original);
+    assert.throws(() => enableGenkouInFolder(tempDir));
+    assert.equal(fs.readFileSync(settingsPath, 'utf-8'), original);
   });
 
   it('初期状態では対象フォルダーは無効（他プロジェクト非干渉）である', () => {

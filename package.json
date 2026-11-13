@@ -215,13 +215,18 @@
     "compile": "tsc --noEmit && node esbuild.js",
     "watch": "node esbuild.js --watch",
     "build": "tsc --noEmit && node esbuild.js --production",
-    "test": "node --import tsx --test test/**/*.test.ts"
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "vscode:prepublish": "npm run build",
+    "test:bundle": "npm run build && node --test test/build/*.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
-    "esbuild": "^0.20.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
   }
 }
