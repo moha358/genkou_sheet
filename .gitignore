@@ -1,0 +1,12 @@
+# Dependencies & Build outputs
+node_modules/
+dist/
+out/
+*.vsix
+
+# OS & Editor files
+.DS_Store
+.vscode-test/
+
+# AI Orchestration Persistent Memory (local workspace state)
+.memory/
