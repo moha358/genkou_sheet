@@ -2,6 +2,11 @@
 
 All notable changes to the **Genkou Sheet (`genkou-sheet`)** extension will be documented in this file.
 
+## [0.1.2] - 2026-11-13
+
+### Added
+- バックアップとの差分画面の右上に「バックアップで原稿を置き換え」ボタンを追加。差分を確認した画面のまま、全文をバックアップの内容に戻せる（Undo で取り消し可、置き換え前の内容も自動で退避）。差分を開いた際に、変更箇所ごとに戻す方法を案内する。
+
 ## [0.1.1] - 2026-11-13
 
 ### Fixed
