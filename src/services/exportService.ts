@@ -5,7 +5,7 @@
 
 import { layoutDocument } from '../core/layoutEngine';
 import { countManuscript } from '../core/counter';
-import { buildCssVariables, GenkouConfig } from '../core/theme';
+import { buildCssVariables, GenkouConfig, sanitizeGenkouConfig } from '../core/theme';
 
 function escapeHtml(str: string): string {
   return str
@@ -19,8 +19,10 @@ function escapeHtml(str: string): string {
 export function generateManuscriptHtml(
   title: string,
   text: string,
-  config: GenkouConfig
+  rawConfig: GenkouConfig
 ): string {
+  // 設定値はワークスペースから任意に書き換えられるため、HTML に埋め込む前に必ず正規化する
+  const config = sanitizeGenkouConfig(rawConfig);
   const layout = layoutDocument(text, config.charsPerLine, config.linesPerPage);
   const stats = countManuscript(text, config.charsPerLine, config.linesPerPage);
   const cssVars = buildCssVariables(config);
@@ -65,7 +67,7 @@ export function generateManuscriptHtml(
           .join('');
 
       return `
-      <section class="genkou-sheet-page" data-mode="${config.writingMode}">
+      <section class="genkou-sheet-page" data-mode="${escapeHtml(config.writingMode)}">
         <div class="genkou-sheet-frame">
           <div class="genkou-half">${renderLines(firstHalf)}</div>
           <div class="genkou-hashira">

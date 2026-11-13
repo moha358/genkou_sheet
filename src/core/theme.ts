@@ -26,6 +26,32 @@ export const DEFAULT_GENKOU_CONFIG: GenkouConfig = {
   highlightDialogue: true,
 };
 
+export const CHARS_PER_LINE_RANGE = { min: 5, max: 100 } as const;
+export const LINES_PER_PAGE_RANGE = { min: 4, max: 100 } as const;
+
+function clampInt(value: unknown, range: { min: number; max: number }, fallback: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
+  return Math.max(range.min, Math.min(range.max, n));
+}
+
+/**
+ * ワークスペース設定など信頼できない入力を、許可された値だけを持つ GenkouConfig に正規化する。
+ * 範囲外・型違いの値は既定値（数値は範囲内へ丸め）に置き換える。
+ */
+export function sanitizeGenkouConfig(input: Partial<Record<keyof GenkouConfig, unknown>>): GenkouConfig {
+  const d = DEFAULT_GENKOU_CONFIG;
+  const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+  return {
+    enabled: bool(input.enabled, d.enabled),
+    writingMode: input.writingMode === 'horizontal-tb' || input.writingMode === 'vertical-rl' ? input.writingMode : d.writingMode,
+    gridColor: input.gridColor === 'green' || input.gridColor === 'red' || input.gridColor === 'dark' ? input.gridColor : d.gridColor,
+    charsPerLine: clampInt(input.charsPerLine, CHARS_PER_LINE_RANGE, d.charsPerLine),
+    linesPerPage: clampInt(input.linesPerPage, LINES_PER_PAGE_RANGE, d.linesPerPage),
+    autoIndent: bool(input.autoIndent, d.autoIndent),
+    highlightDialogue: bool(input.highlightDialogue, d.highlightDialogue),
+  };
+}
+
 export interface ColorPaletteTokens {
   paperBg: string;
   canvasBg: string;
