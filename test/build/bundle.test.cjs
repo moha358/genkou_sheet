@@ -41,6 +41,7 @@ test('bundled extension activates and registers the enable command', () => {
   try {
     const extension = require(path.resolve(__dirname, '../../dist/extension.js'));
     extension.activate({ subscriptions: [], globalStorageUri: { fsPath: require('node:os').tmpdir() } });
+    assert.equal(typeof commands.get('genkouSheet.restoreBackup'), 'function');
     assert.equal(typeof commands.get('genkouSheet.enableFolder'), 'function');
   } finally {
     Module._load = originalLoad;

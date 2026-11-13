@@ -14,6 +14,7 @@ import {
   ManuscriptTreeProvider,
 } from './providers/manuscriptTreeProvider';
 import { StatusBarCounterProvider } from './providers/statusBarProvider';
+import { BackupSnapshot, BackupStore } from './services/backupService';
 import { generateManuscriptHtml } from './services/exportService';
 import {
   disableGenkouInFolder,
@@ -25,6 +26,8 @@ import {
 } from './services/workspaceService';
 
 const STATUS_UPDATE_DELAY_MS = 300;
+const BACKUP_DELAY_MS = 1500;
+const BACKUP_SCHEME = 'genkou-backup';
 
 function getPrimaryWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -39,13 +42,31 @@ function isManuscriptFileName(fileName: string): boolean {
   return ext === '.txt' || ext === '.md';
 }
 
+function isInsideFolder(filePath: string, folder: string): boolean {
+  const rel = path.relative(folder, filePath);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function readBackupSettings() {
+  const cfg = vscode.workspace.getConfiguration('genkouSheet.backup');
+  const num = (v: unknown, fallback: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : fallback));
+  return {
+    enabled: cfg.get('enabled') !== false,
+    maxSnapshots: num(cfg.get('maxSnapshots'), 50, 1, 500),
+    snapshotIntervalMs: num(cfg.get('intervalMinutes'), 5, 1, 120) * 60_000,
+  };
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new StatusBarCounterProvider();
   const treeProvider = new ManuscriptTreeProvider(getPrimaryWorkspaceRoot);
+  const backupStore = new BackupStore(path.join(context.globalStorageUri.fsPath, 'backups'));
+  let folderEnabled = false;
 
   const syncFolderContext = () => {
     const root = getPrimaryWorkspaceRoot();
-    const folderEnabled = Boolean(root && isFolderGenkouEnabled(root));
+    folderEnabled = Boolean(root && isFolderGenkouEnabled(root));
     void vscode.commands.executeCommand(
       'setContext',
       'genkouSheet.isFolderEnabled',
@@ -66,6 +87,148 @@ export function activate(context: vscode.ExtensionContext): void {
       const cfg = readGenkouConfigFromVscode();
       statusBar.updateForDocument(statusDoc, cfg.charsPerLine, cfg.linesPerPage);
     }, STATUS_UPDATE_DELAY_MS);
+  };
+
+  // ── 自動バックアップ ──
+  let editorProvider: GenkouEditorProvider;
+  const backupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  const shouldBackup = (doc: vscode.TextDocument): boolean => {
+    if (doc.uri.scheme !== 'file' || !isManuscriptFileName(doc.fileName)) return false;
+    if (editorProvider?.isOpenInGenkou(doc)) return true;
+    const root = getPrimaryWorkspaceRoot();
+    return Boolean(folderEnabled && root && isInsideFolder(doc.fileName, root));
+  };
+
+  const backupNow = (doc: vscode.TextDocument, forceNewSnapshot = false) => {
+    const key = doc.uri.toString();
+    const timer = backupTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      backupTimers.delete(key);
+    }
+    const settings = readBackupSettings();
+    if (!settings.enabled) return;
+    try {
+      backupStore.write(key, path.basename(doc.fileName), doc.getText(), { ...settings, forceNewSnapshot });
+    } catch (err) {
+      console.error('[Genkou Sheet] backup failed:', err);
+    }
+  };
+
+  const scheduleBackup = (doc: vscode.TextDocument) => {
+    if (!shouldBackup(doc) || !readBackupSettings().enabled) return;
+    const key = doc.uri.toString();
+    const timer = backupTimers.get(key);
+    if (timer) clearTimeout(timer);
+    backupTimers.set(key, setTimeout(() => backupNow(doc), BACKUP_DELAY_MS));
+  };
+
+  const flushAllBackups = () => {
+    for (const key of [...backupTimers.keys()]) {
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === key);
+      if (doc) backupNow(doc);
+    }
+  };
+
+  const backupContentProvider: vscode.TextDocumentContentProvider = {
+    provideTextDocumentContent(uri) {
+      // 読み取り専用で表示する（uri.path = /<key>/<スナップショット名>）
+      const [key, name] = uri.path.replace(/^\//, '').split('/');
+      const snapshot = backupStore.listSnapshotsByKey(key).find((s) => path.basename(s.filePath) === name);
+      return snapshot ? backupStore.readSnapshot(snapshot) : '';
+    },
+  };
+
+  const snapshotUri = (s: BackupSnapshot, displayName: string) =>
+    vscode.Uri.from({ scheme: BACKUP_SCHEME, path: `/${s.key}/${path.basename(s.filePath)}`, query: displayName });
+
+  const restoreBackup = async () => {
+    const activeDoc = editorProvider.getActiveDocument() ?? vscode.window.activeTextEditor?.document;
+    let sourceUri = activeDoc?.uri.toString();
+    let displayName = activeDoc ? path.basename(activeDoc.fileName) : '';
+    let snapshots = sourceUri ? backupStore.listSnapshots(sourceUri) : [];
+
+    if (snapshots.length === 0) {
+      const entries = backupStore.listEntries();
+      if (entries.length === 0) {
+        void vscode.window.showInformationMessage('復元できるバックアップはまだありません。');
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        entries.map((e) => ({
+          label: `$(file) ${e.displayName}`,
+          description: new Date(e.updatedAt).toLocaleString('ja-JP'),
+          detail: e.sourceUri.startsWith('file:') ? vscode.Uri.parse(e.sourceUri).fsPath : e.sourceUri,
+          entry: e,
+        })),
+        { title: 'バックアップから復元: 原稿を選択', matchOnDetail: true }
+      );
+      if (!picked) return;
+      sourceUri = picked.entry.sourceUri;
+      displayName = picked.entry.displayName;
+      snapshots = backupStore.listSnapshotsByKey(picked.entry.key);
+    }
+
+    const snapshotItems = snapshots.map((s) => {
+      let text = '';
+      try {
+        text = backupStore.readSnapshot(s);
+      } catch {
+        // 読めないスナップショットは空として表示
+      }
+      const firstLine = text.split(/\r?\n/).find((l) => l.trim()) ?? '';
+      return {
+        label: `$(history) ${new Date(s.updatedAt).toLocaleString('ja-JP')}`,
+        description: `${text.length.toLocaleString()}文字`,
+        detail: firstLine.trim().slice(0, 60),
+        snapshot: s,
+        text,
+      };
+    });
+    const pickedSnapshot = await vscode.window.showQuickPick(snapshotItems, {
+      title: `バックアップから復元: ${displayName}（新しい順）`,
+    });
+    if (!pickedSnapshot || !sourceUri) return;
+
+    const target = vscode.Uri.parse(sourceUri);
+    const targetExists = target.scheme === 'file' && fs.existsSync(target.fsPath);
+    const actions = [
+      ...(targetExists
+        ? [
+            { label: '$(diff) 現在の原稿との差分を表示', id: 'diff' as const },
+            { label: '$(discard) 原稿をこの内容に戻す', description: '元に戻す (Undo) で取り消せます', id: 'restore' as const },
+          ]
+        : []),
+      { label: '$(new-file) 新しい未保存タブで開く', id: 'open' as const },
+    ];
+    const action = await vscode.window.showQuickPick(actions, { title: 'バックアップの操作を選択' });
+    if (!action) return;
+
+    try {
+      if (action.id === 'diff') {
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          snapshotUri(pickedSnapshot.snapshot, displayName),
+          target,
+          `${displayName}（バックアップ ↔ 現在）`
+        );
+      } else if (action.id === 'restore') {
+        const doc = await vscode.workspace.openTextDocument(target);
+        // 復元前の内容も退避しておき、復元自体を取り消せるようにする
+        backupNow(doc, true);
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), pickedSnapshot.text);
+        if (await vscode.workspace.applyEdit(edit)) {
+          void vscode.window.showInformationMessage(`「${displayName}」をバックアップの内容に戻しました。確認後に保存してください。`);
+        }
+      } else {
+        const doc = await vscode.workspace.openTextDocument({ content: pickedSnapshot.text, language: 'plaintext' });
+        await vscode.window.showTextDocument(doc, { preview: false });
+      }
+    } catch (err) {
+      void vscode.window.showErrorMessage(`バックアップを復元できませんでした: ${errorMessage(err)}`);
+    }
   };
 
   // ── HTML 出力 ──
@@ -130,7 +293,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  const editorProvider = new GenkouEditorProvider(
+  editorProvider = new GenkouEditorProvider(
     context,
     handleDocumentUpdated,
     (doc, format) => {
@@ -155,6 +318,7 @@ export function activate(context: vscode.ExtensionContext): void {
     manifestWatcher.onDidCreate(syncFolderContext),
     manifestWatcher.onDidChange(syncFolderContext),
     manifestWatcher.onDidDelete(syncFolderContext),
+    vscode.workspace.registerTextDocumentContentProvider(BACKUP_SCHEME, backupContentProvider),
     vscode.window.registerCustomEditorProvider(
       GenkouEditorProvider.viewType,
       editorProvider,
@@ -242,6 +406,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await exportCombinedProject();
       }
     ),
+    vscode.commands.registerCommand('genkouSheet.restoreBackup', restoreBackup),
     vscode.commands.registerCommand(
       'genkouSheet.moveFileUp',
       (item?: ManuscriptTreeItem) => {
@@ -266,7 +431,14 @@ export function activate(context: vscode.ExtensionContext): void {
         handleDocumentUpdated(editor.document);
       }
     }),
-    vscode.workspace.onDidSaveTextDocument(() => {
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.contentChanges.length > 0) scheduleBackup(e.document);
+    }),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (backupTimers.has(doc.uri.toString())) backupNow(doc);
+    }),
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+      if (backupTimers.has(doc.uri.toString())) backupNow(doc);
       treeProvider.refresh();
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -275,6 +447,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(syncFolderContext),
+    { dispose: flushAllBackups },
     {
       dispose: () => {
         if (statusTimer) clearTimeout(statusTimer);
@@ -286,5 +459,5 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // No-op
+  // 未書き込みのバックアップは context.subscriptions の dispose で書き出す
 }

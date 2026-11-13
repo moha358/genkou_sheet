@@ -65,6 +65,10 @@
         "title": "Genkou: 原稿ツリー全体を結合して組版HTML / PDF印刷用に書き出し"
       },
       {
+        "command": "genkouSheet.restoreBackup",
+        "title": "Genkou: 自動バックアップから原稿を復元"
+      },
+      {
         "command": "genkouSheet.moveFileUp",
         "title": "Genkou: 原稿の順序を上へ移動",
         "icon": "$(arrow-up)"
@@ -201,6 +205,28 @@
           "default": true,
           "scope": "window",
           "description": "会話文（「…」『…』）をハイライト表示するか"
+        },
+        "genkouSheet.backup.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "編集中の原稿（原稿用紙エディタで開いた文書、および執筆プロジェクト内の .txt / .md）を拡張機能専用の保存領域へ自動バックアップするか。プロジェクトフォルダーにはファイルを作りません。"
+        },
+        "genkouSheet.backup.intervalMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 120,
+          "scope": "window",
+          "description": "新しいバックアップ世代を作る間隔（分）。間隔内の編集は最新世代に上書きされ、入力から約1.5秒後に保存されます。"
+        },
+        "genkouSheet.backup.maxSnapshots": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "scope": "window",
+          "description": "1ファイルあたり保持するバックアップ世代数。古いものから削除されます。"
         }
       }
     }
