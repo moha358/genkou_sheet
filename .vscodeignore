@@ -10,5 +10,7 @@ node_modules/**
 AGENTS.md
 tsconfig.json
 esbuild.js
-*.map
+**/*.map
 *.vsix
+novel/**
+package-lock.json
