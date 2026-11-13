@@ -148,6 +148,50 @@ export function activate(context: vscode.ExtensionContext): void {
   const snapshotUri = (s: BackupSnapshot, displayName: string) =>
     vscode.Uri.from({ scheme: BACKUP_SCHEME, path: `/${s.key}/${path.basename(s.filePath)}`, query: displayName });
 
+  /** 原稿をバックアップの内容に置き換える（Undo 可能。置き換え前の内容も新しい世代として退避する） */
+  const restoreSnapshotText = async (target: vscode.Uri, text: string, displayName: string) => {
+    const doc = await vscode.workspace.openTextDocument(target);
+    backupNow(doc, true);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text);
+    if (await vscode.workspace.applyEdit(edit)) {
+      void vscode.window.showInformationMessage(`「${displayName}」をバックアップの内容に戻しました。確認後に保存してください。`);
+    }
+  };
+
+  /** アクティブなタブが「バックアップ ↔ 現在」の差分なら、その左右の URI を返す */
+  const activeBackupDiff = (): { original: vscode.Uri; modified: vscode.Uri } | undefined => {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    return input instanceof vscode.TabInputTextDiff && input.original.scheme === BACKUP_SCHEME
+      ? { original: input.original, modified: input.modified }
+      : undefined;
+  };
+
+  const syncBackupDiffContext = () => {
+    void vscode.commands.executeCommand('setContext', 'genkouSheet.backupDiffActive', Boolean(activeBackupDiff()));
+  };
+
+  const applyBackupInDiff = async () => {
+    const diff = activeBackupDiff();
+    if (!diff) {
+      void vscode.window.showWarningMessage('バックアップとの差分画面を開いてから実行してください。');
+      return;
+    }
+    const displayName = diff.original.query || path.basename(diff.modified.fsPath);
+    const choice = await vscode.window.showWarningMessage(
+      `「${displayName}」の全文を、左側のバックアップの内容に置き換えますか？（元に戻す (Undo) で取り消せます）`,
+      { modal: true },
+      '置き換える'
+    );
+    if (choice !== '置き換える') return;
+    try {
+      const text = await backupContentProvider.provideTextDocumentContent(diff.original, new vscode.CancellationTokenSource().token);
+      await restoreSnapshotText(diff.modified, text ?? '', displayName);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`バックアップを復元できませんでした: ${errorMessage(err)}`);
+    }
+  };
+
   const restoreBackup = async () => {
     const activeDoc = editorProvider.getActiveDocument() ?? vscode.window.activeTextEditor?.document;
     let sourceUri = activeDoc?.uri.toString();
@@ -237,15 +281,11 @@ export function activate(context: vscode.ExtensionContext): void {
           target,
           `${displayName}（バックアップ ↔ 現在）`
         );
+        void vscode.window.showInformationMessage(
+          '左がバックアップ、右が現在の原稿です。中央の矢印で変更箇所ごとに、右上のボタンで全文をバックアップの内容に戻せます。戻した後は保存してください。'
+        );
       } else if (action.id === 'restore') {
-        const doc = await vscode.workspace.openTextDocument(target);
-        // 復元前の内容も退避しておき、復元自体を取り消せるようにする
-        backupNow(doc, true);
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), pickedSnapshot.text);
-        if (await vscode.workspace.applyEdit(edit)) {
-          void vscode.window.showInformationMessage(`「${displayName}」をバックアップの内容に戻しました。確認後に保存してください。`);
-        }
+        await restoreSnapshotText(target, pickedSnapshot.text, displayName);
       } else {
         const doc = await vscode.workspace.openTextDocument({ content: pickedSnapshot.text, language: 'plaintext' });
         await vscode.window.showTextDocument(doc, { preview: false });
@@ -431,6 +471,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     ),
     vscode.commands.registerCommand('genkouSheet.restoreBackup', restoreBackup),
+    vscode.commands.registerCommand('genkouSheet.applyBackupInDiff', applyBackupInDiff),
+    vscode.window.tabGroups.onDidChangeTabs(syncBackupDiffContext),
+    vscode.window.tabGroups.onDidChangeTabGroups(syncBackupDiffContext),
     vscode.commands.registerCommand(
       'genkouSheet.moveFileUp',
       (item?: ManuscriptTreeItem) => {

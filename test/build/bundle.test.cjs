@@ -16,6 +16,7 @@ test('bundled extension activates and registers the enable command', () => {
       registerCustomEditorProvider: () => disposable,
       registerTreeDataProvider: () => disposable,
       onDidChangeActiveTextEditor: () => disposable,
+      tabGroups: { activeTabGroup: {}, onDidChangeTabs: () => disposable, onDidChangeTabGroups: () => disposable },
     },
     workspace: {
       workspaceFolders: undefined,
@@ -42,6 +43,7 @@ test('bundled extension activates and registers the enable command', () => {
     const extension = require(path.resolve(__dirname, '../../dist/extension.js'));
     extension.activate({ subscriptions: [], globalStorageUri: { fsPath: require('node:os').tmpdir() } });
     assert.equal(typeof commands.get('genkouSheet.restoreBackup'), 'function');
+    assert.equal(typeof commands.get('genkouSheet.applyBackupInDiff'), 'function');
     assert.equal(typeof commands.get('genkouSheet.enableFolder'), 'function');
   } finally {
     Module._load = originalLoad;
