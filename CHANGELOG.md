@@ -2,6 +2,11 @@
 
 All notable changes to the **Genkou Sheet (`genkou-sheet`)** extension will be documented in this file.
 
+## [0.1.4] - 2026-11-13
+
+### Added
+- 原稿用紙エディタで原稿を開くと、前回最後にカーソルがあった位置（最後に執筆していたところ）を表示し、そこから続けて書けるようにした。位置は原稿ごとに VS Code の拡張機能用ストレージへ保存し、プロジェクトフォルダーにはファイルを作らない。
+
 ## [0.1.3] - 2026-11-13
 
 ### Added

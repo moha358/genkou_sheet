@@ -37,6 +37,11 @@ const WEBVIEW_CONFIG_KEYS: ReadonlyArray<keyof GenkouConfig> = [
   'highlightDialogue',
 ];
 
+const CURSOR_POSITIONS_KEY = 'genkouSheet.cursorPositions';
+const MAX_CURSOR_POSITIONS = 200;
+
+type CursorPositions = Record<string, { offset: number; at: number }>;
+
 /** Webview 側は常に LF で扱い、CRLF 文書との間で改行コードを相互変換する */
 function toWebviewText(document: vscode.TextDocument): string {
   const text = document.getText();
@@ -69,6 +74,22 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
   /** 原稿用紙エディタで開かれている文書か */
   public isOpenInGenkou(document: vscode.TextDocument): boolean {
     return this.openDocuments.has(document.uri.toString());
+  }
+
+  private readCursorOffset(document: vscode.TextDocument): number | undefined {
+    const saved = this.context.globalState.get<CursorPositions>(CURSOR_POSITIONS_KEY, {})[document.uri.toString()];
+    return saved && Number.isFinite(saved.offset) ? saved.offset : undefined;
+  }
+
+  /** 原稿ごとの最後のカーソル位置を保存する（最近使った MAX_CURSOR_POSITIONS 件だけ残す） */
+  private saveCursorOffset(document: vscode.TextDocument, offset: number): void {
+    if (!Number.isFinite(offset) || offset < 0) return;
+    const positions = { ...this.context.globalState.get<CursorPositions>(CURSOR_POSITIONS_KEY, {}) };
+    positions[document.uri.toString()] = { offset: Math.floor(offset), at: Date.now() };
+    const kept = Object.entries(positions)
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, MAX_CURSOR_POSITIONS);
+    void this.context.globalState.update(CURSOR_POSITIONS_KEY, Object.fromEntries(kept));
   }
 
   public async resolveCustomTextEditor(
@@ -107,6 +128,7 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
               config: readGenkouConfigFromVscode(),
               version: document.version,
               fileName: path.basename(document.fileName),
+              cursorOffset: this.readCursorOffset(document),
             });
             break;
           }
@@ -153,6 +175,10 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
             } catch (err) {
               void vscode.window.showErrorMessage(`原稿用紙の設定を保存できませんでした: ${err instanceof Error ? err.message : String(err)}`);
             }
+            break;
+          }
+          case 'CURSOR_CHANGED': {
+            this.saveCursorOffset(document, msg.offset);
             break;
           }
           case 'REQUEST_EXPORT': {

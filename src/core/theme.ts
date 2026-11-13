@@ -250,6 +250,8 @@ export type HostToWebviewMessage =
       config: GenkouConfig;
       version: number;
       fileName: string;
+      /** 前回閉じた時のカーソル位置（LF 基準の文字オフセット） */
+      cursorOffset?: number;
     }
   | {
       type: 'DOCUMENT_CHANGED';
@@ -277,7 +279,8 @@ export type WebviewToHostMessage =
   | {
       type: 'REQUEST_EXPORT';
       format: 'html' | 'combined';
-    };
+    }
+  | { type: 'CURSOR_CHANGED'; offset: number };
 
 /**
  * 比較画面（原稿用紙2枚の並列表示） Host ⇔ Webview メッセージングプロトコル

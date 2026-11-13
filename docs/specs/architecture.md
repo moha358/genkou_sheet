@@ -123,7 +123,7 @@ genkou_sheet/
 型安全な判別共用体（Discriminated Unions）で通信を行う。
 
 ### Host → Webview (`HostToWebviewMessage`)
-* `INIT_DOCUMENT`: `{ type: 'INIT_DOCUMENT', text: string, config: GenkouConfig, version: number }`
+* `INIT_DOCUMENT`: `{ type: 'INIT_DOCUMENT', text: string, config: GenkouConfig, version: number, fileName: string, cursorOffset?: number }`（`cursorOffset` は前回閉じた時のカーソル位置。Webview 側の LF 基準の文字オフセット）
 * `DOCUMENT_CHANGED`: `{ type: 'DOCUMENT_CHANGED', text: string, version: number }`（外部変更やUndo/Redo時）
 * `EDIT_RESULT`: `{ type: 'EDIT_RESULT', text: string, version: number, accepted: boolean }`（編集の成否と現在の文書）
 * `CONFIG_CHANGED`: `{ type: 'CONFIG_CHANGED', config: GenkouConfig }`
@@ -134,6 +134,7 @@ genkou_sheet/
 * `PRESERVE_CONFLICT`: `{ type: 'PRESERVE_CONFLICT', text: string }`（競合した未保存入力を新規文書に退避）
 * `UPDATE_CONFIG`: `{ type: 'UPDATE_CONFIG', partialConfig: Partial<GenkouConfig> }`
 * `REQUEST_EXPORT`: `{ type: 'REQUEST_EXPORT', format: 'html' | 'combined' }`
+* `CURSOR_CHANGED`: `{ type: 'CURSOR_CHANGED', offset: number }`（カーソル移動後 0.5 秒で送信。Host が原稿ごとに保存する）
 
 ### 比較画面 (`CompareHostToWebviewMessage` / `CompareWebviewToHostMessage`)
 * Host → Webview `INIT_COMPARE`: `{ type: 'INIT_COMPARE', config: GenkouConfig, fileName: string, left: ComparePaneData, right: ComparePaneData }`（`ComparePaneData` = `{ label, detail, text, adoptLabel }`）
@@ -148,7 +149,12 @@ genkou_sheet/
 
 ---
 
-## 5. 自動バックアップ
+## 5. 執筆位置の復元
+
+* Webview はカーソル位置が変わると 0.5 秒後に `CURSOR_CHANGED` を送る。Host は `ExtensionContext.globalState` の `genkouSheet.cursorPositions`（原稿 URI → `{ offset, at }`）に保存し、最近使った 200 件だけを残す。
+* 原稿用紙エディタを開くと、`INIT_DOCUMENT` の `cursorOffset` で前回の位置を渡し、Webview はその位置にカーソルを置いて表示する（本文より長い位置は末尾に丸める）。
+
+## 6. 自動バックアップ
 
 * 対象: 原稿用紙エディタで開いた `file:` スキームの `.txt` / `.md`、および有効化済みフォルダー内の `.txt` / `.md`。
 * 保存先: `ExtensionContext.globalStorageUri/backups/<URIのSHA-256先頭32桁>/`。プロジェクトフォルダーにはファイルを作らない。
@@ -161,7 +167,7 @@ genkou_sheet/
 
 ---
 
-## 6. グローバルテーマ設計 (Global Theme Management)
+## 7. グローバルテーマ設計 (Global Theme Management)
 
 コンポーネント内でのスタイル直書き（ハードコード）を禁止し、`src/core/theme.ts` および `globalTheme.css` の CSS カスタムプロパティ（Design Tokens）で一元管理する。
 

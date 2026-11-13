@@ -42,6 +42,8 @@ class GenkouWebviewApp {
   private cursorRawOffset: number = 0;
   private cursorCoords: GridCursorCoords = { globalLineIndex: 0, cellIndex: 0 };
   private selectionAnchorCoords: GridCursorCoords | null = null;
+  private reportedCursorOffset: number | undefined;
+  private cursorReportTimer: ReturnType<typeof setTimeout> | undefined;
 
   private readonly toolbar: EditorToolbar;
   private readonly sheetRenderer: GenkouSheetRenderer;
@@ -192,8 +194,12 @@ class GenkouWebviewApp {
         this.selectionAnchorCoords = null;
         this.applyThemeVariables();
         this.toolbar.syncConfig(this.config);
-        this.cursorRawOffset = Math.min(this.cursorRawOffset, this.text.length);
+        // 前回閉じた位置から書き始められるよう、保存されたカーソル位置を復元する
+        const restored = msg.cursorOffset ?? this.cursorRawOffset;
+        this.cursorRawOffset = Math.max(0, Math.min(restored, this.text.length));
+        this.reportedCursorOffset = this.cursorRawOffset;
         this.refreshLayout(true, true);
+        this.sheetRenderer.getActiveCellElement()?.scrollIntoView({ block: 'center', inline: 'center' });
         break;
       }
       case 'DOCUMENT_CHANGED': {
@@ -267,6 +273,8 @@ class GenkouWebviewApp {
       this.fileName
     );
 
+    this.scheduleCursorReport();
+
     if (focusInput) {
       const activeCell = this.sheetRenderer.getActiveCellElement();
       if (activeCell) {
@@ -274,6 +282,18 @@ class GenkouWebviewApp {
       }
       this.inputController.focusAtCell(activeCell);
     }
+  }
+
+  /** カーソル位置を Host に知らせ、次回開いた時にその位置から表示できるようにする */
+  private scheduleCursorReport(): void {
+    if (this.cursorRawOffset === this.reportedCursorOffset) return;
+    if (this.cursorReportTimer) clearTimeout(this.cursorReportTimer);
+    this.cursorReportTimer = setTimeout(() => {
+      this.cursorReportTimer = undefined;
+      if (this.cursorRawOffset === this.reportedCursorOffset) return;
+      this.reportedCursorOffset = this.cursorRawOffset;
+      this.vscode.postMessage({ type: 'CURSOR_CHANGED', offset: this.cursorRawOffset });
+    }, 500);
   }
 
   private openRubyModalForCursor(): void {
