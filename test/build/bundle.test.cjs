@@ -19,7 +19,15 @@ test('bundled extension activates and registers the enable command', () => {
     },
     workspace: {
       workspaceFolders: undefined,
+      textDocuments: [],
       onDidSaveTextDocument: () => disposable,
+      onDidChangeTextDocument: () => disposable,
+      onDidCloseTextDocument: () => disposable,
+      onDidChangeConfiguration: () => disposable,
+      onDidChangeWorkspaceFolders: () => disposable,
+      registerTextDocumentContentProvider: () => disposable,
+      createFileSystemWatcher: () => ({ ...disposable, onDidCreate: () => disposable, onDidChange: () => disposable, onDidDelete: () => disposable }),
+      getConfiguration: () => ({ get: () => undefined }),
     },
     commands: {
       registerCommand: (id, handler) => { commands.set(id, handler); return disposable; },
@@ -32,7 +40,7 @@ test('bundled extension activates and registers the enable command', () => {
   };
   try {
     const extension = require(path.resolve(__dirname, '../../dist/extension.js'));
-    extension.activate({ subscriptions: [] });
+    extension.activate({ subscriptions: [], globalStorageUri: { fsPath: require('node:os').tmpdir() } });
     assert.equal(typeof commands.get('genkouSheet.enableFolder'), 'function');
   } finally {
     Module._load = originalLoad;
