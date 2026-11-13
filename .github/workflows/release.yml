@@ -1,0 +1,131 @@
+# リリース: v* タグの push で VS Code Marketplace と Open VSX に公開し、GitHub Release に VSIX を添付する。
+#   1. package.json の version と CHANGELOG.md を更新してコミット
+#   2. git tag v<version> && git push origin main --tags
+#
+# 必要な設定:
+#   - VS Code Marketplace: 管理ページの Trusted Publishing で
+#     リポジトリ moha358/genkou_sheet・ワークフロー release.yml のポリシーを作成（シークレット不要）
+#   - Open VSX: リポジトリのシークレット OVSX_PAT に open-vsx.org のアクセストークンを登録
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  VSCE_VERSION: 4.1.1
+  OVSX_VERSION: 1.4.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      vsix: ${{ steps.package.outputs.vsix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: タグと package.json の version が一致するか確認
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::タグ ${GITHUB_REF_NAME} と package.json の version ${version} が一致しません"
+            exit 1
+          fi
+          if ! grep -q "^## \[${version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md に ${version} の項目がありません"
+            exit 1
+          fi
+
+      - name: テスト
+        run: |
+          npm test
+          npm run test:bundle
+
+      - name: VSIX を作成
+        id: package
+        run: |
+          vsix="genkou-sheet-$(node -p "require('./package.json').version").vsix"
+          npx --yes "@vscode/vsce@${VSCE_VERSION}" package --out "$vsix"
+          echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: ${{ steps.package.outputs.vsix }}
+          if-no-files-found: error
+
+  publish-marketplace:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Trusted Publishing（OIDC）に必要
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: VS Code Marketplace に公開
+        run: npx --yes "@vscode/vsce@${VSCE_VERSION}" publish --oidc --skip-duplicate --packagePath "${{ needs.build.outputs.vsix }}"
+
+  publish-openvsx:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Open VSX に公開
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::シークレット OVSX_PAT が設定されていません"
+            exit 1
+          fi
+          # 初回公開時のみ名前空間（= package.json の publisher）を作成する。作成済みならエラーになるため無視する
+          publisher=$(unzip -p "${{ needs.build.outputs.vsix }}" extension/package.json | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).publisher")
+          npx --yes "ovsx@${OVSX_VERSION}" create-namespace "$publisher" || echo "名前空間 $publisher は作成済みです"
+          npx --yes "ovsx@${OVSX_VERSION}" publish "${{ needs.build.outputs.vsix }}" --skip-duplicate
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: GitHub Release を作成
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # CHANGELOG.md から該当バージョンの項目を抜き出してリリースノートにする
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          gh release create "$GITHUB_REF_NAME" "${{ needs.build.outputs.vsix }}" \
+            --title "$GITHUB_REF_NAME" --notes-file release-notes.md --verify-tag

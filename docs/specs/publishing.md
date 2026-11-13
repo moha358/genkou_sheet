@@ -73,3 +73,20 @@ Marketplace 公開審査および検索性（SEO）を満たすため、`package
    * `README.md`: スクリーンショット／GIFデモ、クイックスタート（フォルダーの有効化手順）、機能一覧、キーボード操作、出力・バックアップ復元の手順、設定一覧、既知の制限を記載。Marketplace の利用者向けページになるため、開発者・AI 向けの内部ドキュメント（`docs/`、`AGENTS.md`）へのリンクは載せない。
    * `CHANGELOG.md`: Keep a Changelog 形式でバージョン履歴を管理。
    * `LICENSE`: MIT License。
+
+---
+
+## 5. 自動リリース（GitHub Actions）
+
+`.github/workflows/release.yml` が `v*` タグの push で次を実行する。
+
+1. **build:** `npm ci` → タグと `package.json` の `version`、`CHANGELOG.md` の該当項目の一致を確認 → `npm test` / `npm run test:bundle` → `@vscode/vsce package` で VSIX を作成。
+2. **publish-marketplace:** VS Code Marketplace の Trusted Publishing（`vsce publish --oidc`、vsce 4.1.0 以上）で公開する。PAT は 2026-12-01 に廃止されるため使わない。Marketplace 管理ページで、リポジトリ `moha358/genkou_sheet`・ワークフロー `release.yml` のポリシーを登録しておく。
+3. **publish-openvsx:** シークレット `OVSX_PAT`（open-vsx.org のアクセストークン）で `ovsx publish` する。名前空間 `moha358` が無ければ作成する。
+4. **github-release:** `CHANGELOG.md` の該当項目をリリースノートにして GitHub Release を作り、VSIX を添付する。
+
+いずれの公開も `--skip-duplicate` を付けるため、手動アップロード済みのバージョンや再実行で失敗しない。
+
+### リリース手順
+1. `package.json` の `version` を上げ（`npm install --package-lock-only` で lock も更新）、`CHANGELOG.md` に `## [<version>] - <日付>` の項目を追加してコミットする。
+2. `git tag v<version>` → `git push origin main --tags`。
