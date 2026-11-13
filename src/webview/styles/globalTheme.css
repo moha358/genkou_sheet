@@ -105,6 +105,15 @@ body {
   position: relative;
 }
 
+/* 画面外ページの大きさを維持し、セルは表示範囲付近だけ生成する。 */
+.genkou-page-placeholder {
+  width: var(--genkou-measured-page-width);
+  height: var(--genkou-measured-page-height);
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* 原稿用紙1枚（400字詰めシート） */
 .genkou-sheet-page {
   background-color: var(--genkou-paper-bg);

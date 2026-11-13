@@ -121,13 +121,15 @@ genkou_sheet/
 ### Host → Webview (`HostToWebviewMessage`)
 * `INIT_DOCUMENT`: `{ type: 'INIT_DOCUMENT', text: string, config: GenkouConfig, version: number }`
 * `DOCUMENT_CHANGED`: `{ type: 'DOCUMENT_CHANGED', text: string, version: number }`（外部変更やUndo/Redo時）
+* `EDIT_RESULT`: `{ type: 'EDIT_RESULT', text: string, version: number, accepted: boolean }`（編集の成否と現在の文書）
 * `CONFIG_CHANGED`: `{ type: 'CONFIG_CHANGED', config: GenkouConfig }`
 
 ### Webview → Host (`WebviewToHostMessage`)
 * `READY`: `{ type: 'READY' }`
-* `EDIT_TEXT`: `{ type: 'EDIT_TEXT', text: string, range?: TextRange, version: number }`
+* `EDIT_TEXT`: `{ type: 'EDIT_TEXT', text: string, version: number }`（version は編集元の文書バージョン。送信は一件ずつ）
+* `PRESERVE_CONFLICT`: `{ type: 'PRESERVE_CONFLICT', text: string }`（競合した未保存入力を新規文書に退避）
 * `UPDATE_CONFIG`: `{ type: 'UPDATE_CONFIG', partialConfig: Partial<GenkouConfig> }`
-* `REQUEST_EXPORT`: `{ type: 'REQUEST_EXPORT', format: 'html' | 'print' }`
+* `REQUEST_EXPORT`: `{ type: 'REQUEST_EXPORT', format: 'html' | 'combined' }`
 
 ---
 

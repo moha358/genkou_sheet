@@ -225,6 +225,7 @@ export type HostToWebviewMessage =
       text: string;
       version: number;
     }
+  | { type: 'EDIT_RESULT'; text: string; version: number; accepted: boolean }
   | {
       type: 'CONFIG_CHANGED';
       config: GenkouConfig;
@@ -237,6 +238,7 @@ export type WebviewToHostMessage =
       text: string;
       version: number;
     }
+  | { type: 'PRESERVE_CONFLICT'; text: string }
   | {
       type: 'UPDATE_CONFIG';
       partialConfig: Partial<GenkouConfig>;

@@ -81,7 +81,7 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
 
-    let isApplyingWebviewEdit = false;
+    let applyingWebviewText: string | undefined;
 
     const postToWebview = (message: HostToWebviewMessage) => {
       void webviewPanel.webview.postMessage(message);
@@ -101,22 +101,25 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
             break;
           }
           case 'EDIT_TEXT': {
-            if (msg.text === document.getText()) {
-              return;
+            let accepted = msg.version === document.version;
+            if (accepted && msg.text !== document.getText()) {
+              applyingWebviewText = msg.text;
+              try {
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), msg.text);
+                accepted = await vscode.workspace.applyEdit(edit);
+                this.onDocumentUpdated(document);
+              } finally {
+                applyingWebviewText = undefined;
+              }
             }
-            isApplyingWebviewEdit = true;
-            try {
-              const edit = new vscode.WorkspaceEdit();
-              const fullRange = new vscode.Range(
-                document.positionAt(0),
-                document.positionAt(document.getText().length)
-              );
-              edit.replace(document.uri, fullRange, msg.text);
-              await vscode.workspace.applyEdit(edit);
-              this.onDocumentUpdated(document);
-            } finally {
-              isApplyingWebviewEdit = false;
-            }
+            postToWebview({ type: 'EDIT_RESULT', accepted, text: document.getText(), version: document.version });
+            break;
+          }
+          case 'PRESERVE_CONFLICT': {
+            const recovered = await vscode.workspace.openTextDocument({ content: msg.text, language: document.languageId });
+            await vscode.window.showTextDocument(recovered, { preview: false, viewColumn: vscode.ViewColumn.Beside });
+            void vscode.window.showWarningMessage('原稿の編集が競合したため、未反映の内容を新しい未保存文書に退避しました。内容を確認して保存してください。');
             break;
           }
           case 'UPDATE_CONFIG': {
@@ -150,7 +153,7 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
           return;
         }
         this.onDocumentUpdated(document);
-        if (!isApplyingWebviewEdit && e.contentChanges.length > 0) {
+        if (document.getText() !== applyingWebviewText && e.contentChanges.length > 0) {
           postToWebview({
             type: 'DOCUMENT_CHANGED',
             text: document.getText(),

@@ -34,9 +34,11 @@ class GenkouWebviewApp {
   private readonly vscode = acquireVsCodeApi();
   private text: string = '';
   private version: number = 0;
+  private pendingEdit: string | null = null;
   private fileName: string = '原稿';
   private config: GenkouConfig = { ...DEFAULT_GENKOU_CONFIG };
   private layout: DocumentLayoutResult = layoutDocument('', 20, 20);
+  private layoutKey: string | undefined;
   private cursorRawOffset: number = 0;
   private cursorCoords: GridCursorCoords = { globalLineIndex: 0, cellIndex: 0 };
   private selectionAnchorCoords: GridCursorCoords | null = null;
@@ -196,12 +198,32 @@ class GenkouWebviewApp {
       }
       case 'DOCUMENT_CHANGED': {
         if (msg.text !== this.text) {
+          if (this.pendingEdit !== null) {
+            this.vscode.postMessage({ type: 'PRESERVE_CONFLICT', text: this.text });
+            this.pendingEdit = null;
+          }
           this.text = msg.text;
           this.version = msg.version;
           this.selectionAnchorCoords = null;
           this.cursorRawOffset = Math.min(this.cursorRawOffset, this.text.length);
           this.refreshLayout(true, true);
+        } else this.version = msg.version;
+        break;
+      }
+      case 'EDIT_RESULT': {
+        if (this.pendingEdit === null) break;
+        const sent = this.pendingEdit;
+        this.pendingEdit = null;
+        if (!msg.accepted || msg.text !== sent) {
+          this.vscode.postMessage({ type: 'PRESERVE_CONFLICT', text: this.text });
+          this.text = msg.text;
+          this.version = msg.version;
+          this.cursorRawOffset = Math.min(this.cursorRawOffset, this.text.length);
+          this.refreshLayout(true, true);
+          break;
         }
+        this.version = msg.version;
+        if (this.text !== sent) this.sendPendingEdit();
         break;
       }
       case 'CONFIG_CHANGED': {
@@ -217,32 +239,25 @@ class GenkouWebviewApp {
   private applyLocalTextEdit(newText: string, newCursorOffset: number): void {
     this.text = newText;
     this.cursorRawOffset = newCursorOffset;
-    this.version += 1;
     this.refreshLayout(true, true);
-    this.vscode.postMessage({
-      type: 'EDIT_TEXT',
-      text: this.text,
-      version: this.version,
-    });
+    if (this.pendingEdit === null) this.sendPendingEdit();
+  }
+
+  private sendPendingEdit(): void {
+    this.pendingEdit = this.text;
+    this.vscode.postMessage({ type: 'EDIT_TEXT', text: this.text, version: this.version });
   }
 
   private refreshLayout(focusInput: boolean, recomputeCoordsFromOffset: boolean = false): void {
-    this.layout = layoutDocument(
-      this.text,
-      this.config.charsPerLine,
-      this.config.linesPerPage
-    );
-
+    const key = `${this.config.charsPerLine}:${this.config.linesPerPage}:${this.text}`;
+    if (key !== this.layoutKey) {
+      this.layout = layoutDocument(this.text, this.config.charsPerLine, this.config.linesPerPage);
+      this.layoutKey = key;
+      this.toolbar.updateStats(countManuscript(this.text, this.config.charsPerLine, this.config.linesPerPage));
+    }
     if (recomputeCoordsFromOffset) {
       this.cursorCoords = rawOffsetToGridCoords(this.layout, this.cursorRawOffset);
     }
-
-    const stats = countManuscript(
-      this.text,
-      this.config.charsPerLine,
-      this.config.linesPerPage
-    );
-    this.toolbar.updateStats(stats);
 
     this.sheetRenderer.render(
       this.layout,

@@ -36,6 +36,7 @@ export class GenkouSheetRenderer {
   private readonly viewport: HTMLElement;
   private activeCellEl: HTMLElement | null = null;
   private isMouseSelecting: boolean = false;
+  private pageObserver: IntersectionObserver | undefined;
 
   constructor(
     container: HTMLElement,
@@ -65,6 +66,8 @@ export class GenkouSheetRenderer {
     selectionAnchorCoords: CellCoordinates | null,
     fileName: string
   ): void {
+    this.pageObserver?.disconnect();
+    const oldScrollTop = this.viewport.scrollTop;
     this.viewport.innerHTML = '';
     this.activeCellEl = null;
 
@@ -77,7 +80,7 @@ export class GenkouSheetRenderer {
     const activeCell = activeLine?.cells[cursorCoords.cellIndex];
     const activeRubyGroupStart = activeCell?.token?.ruby?.groupRawStart;
 
-    for (const page of layout.pages) {
+    const makePage = (page: DocumentLayoutResult['pages'][number]): HTMLElement => {
       const pageEl = document.createElement('section');
       pageEl.className = 'genkou-sheet-page';
       pageEl.dataset.mode = config.writingMode;
@@ -132,8 +135,35 @@ export class GenkouSheetRenderer {
       );
 
       pageEl.appendChild(frameEl);
-      this.viewport.appendChild(pageEl);
-    }
+      return pageEl;
+    };
+
+    // Measure a real page once, then keep lightweight placeholders for off-screen pages.
+    const activePage = Math.min(layout.pages.length - 1, Math.floor(cursorCoords.globalLineIndex / config.linesPerPage));
+    const activeElement = makePage(layout.pages[activePage]);
+    this.viewport.appendChild(activeElement);
+    const rect = activeElement.getBoundingClientRect();
+    this.viewport.style.setProperty('--genkou-measured-page-height', `${rect.height}px`);
+    this.viewport.style.setProperty('--genkou-measured-page-width', `${rect.width}px`);
+    activeElement.remove();
+    const shells = layout.pages.map((page, index) => {
+      const shell = document.createElement('div');
+      shell.className = 'genkou-page-placeholder';
+      if (index === activePage) shell.appendChild(activeElement);
+      this.viewport.appendChild(shell);
+      return { shell, page, index };
+    });
+    this.viewport.scrollTop = oldScrollTop;
+    const pagesByElement = new Map(shells.map((entry) => [entry.shell, entry]));
+    this.pageObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const item = pagesByElement.get(entry.target as HTMLDivElement);
+        if (!item) continue;
+        if (entry.isIntersecting && !item.shell.firstChild) item.shell.appendChild(makePage(item.page));
+        else if (!entry.isIntersecting && item.index !== activePage) item.shell.replaceChildren();
+      }
+    }, { root: this.viewport, rootMargin: '100% 0px' });
+    shells.forEach(({ shell }) => this.pageObserver!.observe(shell));
   }
 
   private renderHalfBlock(
