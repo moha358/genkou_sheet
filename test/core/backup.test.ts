@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { BackupStore } from '../../src/services/backupService';
+import { BackupStore, matchesSavedFile } from '../../src/services/backupService';
 
 const URI = 'file:///novel/chapter1.txt';
 const MIN = 60_000;
@@ -51,5 +51,17 @@ describe('BackupStore (原稿の自動バックアップ)', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].sourceUri, URI);
     assert.equal(entries[0].displayName, 'chapter1.txt');
+  });
+});
+
+describe('matchesSavedFile (保存済み内容との比較)', () => {
+  it('ディスクと同じ内容のみ true を返し、読めないファイルは false', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'genkou-saved-'));
+    const file = path.join(dir, 'c.txt');
+    fs.writeFileSync(file, '保存済み', 'utf-8');
+    assert.equal(matchesSavedFile(file, '保存済み'), true);
+    assert.equal(matchesSavedFile(file, '保存済み＋未保存の追記'), false);
+    assert.equal(matchesSavedFile(path.join(dir, 'missing.txt'), ''), false);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

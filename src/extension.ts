@@ -14,7 +14,7 @@ import {
   ManuscriptTreeProvider,
 } from './providers/manuscriptTreeProvider';
 import { StatusBarCounterProvider } from './providers/statusBarProvider';
-import { BackupSnapshot, BackupStore } from './services/backupService';
+import { BackupSnapshot, BackupStore, matchesSavedFile } from './services/backupService';
 import { generateManuscriptHtml } from './services/exportService';
 import {
   disableGenkouInFolder,
@@ -109,8 +109,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const settings = readBackupSettings();
     if (!settings.enabled) return;
+    const text = doc.getText();
+    // 保存済みの内容は原稿ファイル自体に残っている。「保存しない」で閉じた際の revert で
+    // 未保存の本文を持つ最新世代を上書きしないよう、ディスクと同じ内容は書き込まない。
+    // ただし復元直前の退避（forceNewSnapshot）は、復元後に保存すると失われるため必ず書く。
+    if (!forceNewSnapshot && matchesSavedFile(doc.fileName, text)) return;
     try {
-      backupStore.write(key, path.basename(doc.fileName), doc.getText(), { ...settings, forceNewSnapshot });
+      backupStore.write(key, path.basename(doc.fileName), text, { ...settings, forceNewSnapshot });
     } catch (err) {
       console.error('[Genkou Sheet] backup failed:', err);
     }
@@ -170,6 +175,21 @@ export function activate(context: vscode.ExtensionContext): void {
       snapshots = backupStore.listSnapshotsByKey(picked.entry.key);
     }
 
+    // 現在の原稿（開いていれば編集中の内容、閉じていればディスク上の内容）と同じ世代を見分けられるようにする
+    let currentText: string | undefined;
+    if (sourceUri) {
+      const openDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === sourceUri);
+      if (openDoc) currentText = openDoc.getText();
+      else {
+        const uri = vscode.Uri.parse(sourceUri);
+        try {
+          if (uri.scheme === 'file') currentText = fs.readFileSync(uri.fsPath, 'utf-8');
+        } catch {
+          // 削除済みなど
+        }
+      }
+    }
+
     const snapshotItems = snapshots.map((s) => {
       let text = '';
       try {
@@ -180,7 +200,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const firstLine = text.split(/\r?\n/).find((l) => l.trim()) ?? '';
       return {
         label: `$(history) ${new Date(s.updatedAt).toLocaleString('ja-JP')}`,
-        description: `${text.length.toLocaleString()}文字`,
+        description: `${text.length.toLocaleString()}文字${text === currentText ? '（現在の原稿と同じ）' : ''}`,
         detail: firstLine.trim().slice(0, 60),
         snapshot: s,
         text,
@@ -207,6 +227,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     try {
       if (action.id === 'diff') {
+        if (pickedSnapshot.text === currentText) {
+          void vscode.window.showInformationMessage('このバックアップは現在の原稿と同じ内容です。より古い日時のバックアップを選ぶと差分を確認できます。');
+          return;
+        }
         await vscode.commands.executeCommand(
           'vscode.diff',
           snapshotUri(pickedSnapshot.snapshot, displayName),

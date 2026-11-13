@@ -46,6 +46,19 @@ interface BackupMeta {
 
 const SNAPSHOT_RE = /^(\d{13})\.txt$/;
 
+/**
+ * text がディスク上の保存済み内容と同一か。
+ * 「保存しない」で閉じた際の revert もテキスト変更として通知されるため、
+ * 保存済み内容でバックアップ世代を上書きして未保存の本文を失わないよう、書き込み前に判定する。
+ */
+export function matchesSavedFile(filePath: string, text: string): boolean {
+  try {
+    return fs.readFileSync(filePath, 'utf-8') === text;
+  } catch {
+    return false;
+  }
+}
+
 function writeFileAtomic(filePath: string, content: string): void {
   const tmp = `${filePath}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, content, 'utf-8');
