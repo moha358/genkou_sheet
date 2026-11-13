@@ -136,17 +136,34 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  // 差分表示用の読み取り専用文書（genkou-backup: スキーム）。
+  // パスを .txt / .md で終わらせないことで、執筆フォルダーの editorAssociations（*.txt → 原稿用紙エディタ）が
+  // 差分画面に適用されず、色付きのテキスト差分で表示されるようにする。
+  //   /<key>/<作成時刻ms>   … バックアップ世代
+  //   /current/<連番>        … 差分を開いた時点の原稿の内容（メモリ上に保持）
+  // query には復元先の原稿 URI（target）と表示名（name）を持たせる。
+  const currentTexts = new Map<string, string>();
+  let currentSeq = 0;
+
   const backupContentProvider: vscode.TextDocumentContentProvider = {
     provideTextDocumentContent(uri) {
-      // 読み取り専用で表示する（uri.path = /<key>/<スナップショット名>）
-      const [key, name] = uri.path.replace(/^\//, '').split('/');
-      const snapshot = backupStore.listSnapshotsByKey(key).find((s) => path.basename(s.filePath) === name);
+      const [dir, name] = uri.path.replace(/^\//, '').split('/');
+      if (dir === 'current') return currentTexts.get(name) ?? '';
+      const snapshot = backupStore.listSnapshotsByKey(dir).find((s) => path.basename(s.filePath) === `${name}.txt`);
       return snapshot ? backupStore.readSnapshot(snapshot) : '';
     },
   };
 
-  const snapshotUri = (s: BackupSnapshot, displayName: string) =>
-    vscode.Uri.from({ scheme: BACKUP_SCHEME, path: `/${s.key}/${path.basename(s.filePath)}`, query: displayName });
+  const diffQuery = (target: string, displayName: string) => new URLSearchParams({ target, name: displayName }).toString();
+
+  const snapshotUri = (s: BackupSnapshot, target: string, displayName: string) =>
+    vscode.Uri.from({ scheme: BACKUP_SCHEME, path: `/${s.key}/${path.basename(s.filePath, '.txt')}`, query: diffQuery(target, displayName) });
+
+  const currentUri = (text: string, target: string, displayName: string) => {
+    const id = String(++currentSeq);
+    currentTexts.set(id, text);
+    return vscode.Uri.from({ scheme: BACKUP_SCHEME, path: `/current/${id}`, query: diffQuery(target, displayName) });
+  };
 
   /** 原稿をバックアップの内容に置き換える（Undo 可能。置き換え前の内容も新しい世代として退避する） */
   const restoreSnapshotText = async (target: vscode.Uri, text: string, displayName: string) => {
@@ -159,16 +176,43 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  /** アクティブなタブが「バックアップ ↔ 現在」の差分なら、その左右の URI を返す */
-  const activeBackupDiff = (): { original: vscode.Uri; modified: vscode.Uri } | undefined => {
+  interface BackupDiffInfo {
+    snapshot: vscode.Uri;
+    target: vscode.Uri;
+    displayName: string;
+  }
+
+  const diffInfoFrom = (snapshot: vscode.Uri): BackupDiffInfo | undefined => {
+    const params = new URLSearchParams(snapshot.query);
+    const target = params.get('target');
+    return target ? { snapshot, target: vscode.Uri.parse(target), displayName: params.get('name') || path.basename(vscode.Uri.parse(target).path) } : undefined;
+  };
+
+  /** アクティブなタブがバックアップとの差分なら、そのバックアップと復元先を返す */
+  const activeBackupDiff = (): BackupDiffInfo | undefined => {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
     return input instanceof vscode.TabInputTextDiff && input.original.scheme === BACKUP_SCHEME
-      ? { original: input.original, modified: input.modified }
+      ? diffInfoFrom(input.original)
       : undefined;
   };
 
   const syncBackupDiffContext = () => {
     void vscode.commands.executeCommand('setContext', 'genkouSheet.backupDiffActive', Boolean(activeBackupDiff()));
+  };
+
+  const applyBackup = async (diff: BackupDiffInfo) => {
+    const choice = await vscode.window.showWarningMessage(
+      `「${diff.displayName}」の全文を、左側のバックアップの内容に置き換えますか？（元に戻す (Undo) で取り消せます）`,
+      { modal: true },
+      '置き換える'
+    );
+    if (choice !== '置き換える') return;
+    try {
+      const text = await backupContentProvider.provideTextDocumentContent(diff.snapshot, new vscode.CancellationTokenSource().token);
+      await restoreSnapshotText(diff.target, text ?? '', diff.displayName);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`バックアップを復元できませんでした: ${errorMessage(err)}`);
+    }
   };
 
   const applyBackupInDiff = async () => {
@@ -177,19 +221,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage('バックアップとの差分画面を開いてから実行してください。');
       return;
     }
-    const displayName = diff.original.query || path.basename(diff.modified.fsPath);
-    const choice = await vscode.window.showWarningMessage(
-      `「${displayName}」の全文を、左側のバックアップの内容に置き換えますか？（元に戻す (Undo) で取り消せます）`,
-      { modal: true },
-      '置き換える'
-    );
-    if (choice !== '置き換える') return;
-    try {
-      const text = await backupContentProvider.provideTextDocumentContent(diff.original, new vscode.CancellationTokenSource().token);
-      await restoreSnapshotText(diff.modified, text ?? '', displayName);
-    } catch (err) {
-      void vscode.window.showErrorMessage(`バックアップを復元できませんでした: ${errorMessage(err)}`);
-    }
+    await applyBackup(diff);
   };
 
   const restoreBackup = async () => {
@@ -275,15 +307,23 @@ export function activate(context: vscode.ExtensionContext): void {
           void vscode.window.showInformationMessage('このバックアップは現在の原稿と同じ内容です。より古い日時のバックアップを選ぶと差分を確認できます。');
           return;
         }
+        const left = snapshotUri(pickedSnapshot.snapshot, sourceUri, displayName);
         await vscode.commands.executeCommand(
           'vscode.diff',
-          snapshotUri(pickedSnapshot.snapshot, displayName),
-          target,
+          left,
+          currentUri(currentText ?? '', sourceUri, displayName),
           `${displayName}（バックアップ ↔ 現在）`
         );
-        void vscode.window.showInformationMessage(
-          '左がバックアップ、右が現在の原稿です。中央の矢印で変更箇所ごとに、右上のボタンで全文をバックアップの内容に戻せます。戻した後は保存してください。'
+        syncBackupDiffContext();
+        const replace = '全文をこのバックアップに置き換える';
+        const picked = await vscode.window.showInformationMessage(
+          '左がバックアップ、右が差分を開いた時点の原稿です。全文を戻すには、このボタンか差分画面右上のボタンを押してください。一部だけ戻す場合は、左側から必要な箇所をコピーしてください。',
+          replace
         );
+        if (picked === replace) {
+          const info = diffInfoFrom(left);
+          if (info) await applyBackup(info);
+        }
       } else if (action.id === 'restore') {
         await restoreSnapshotText(target, pickedSnapshot.text, displayName);
       } else {
@@ -474,6 +514,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('genkouSheet.applyBackupInDiff', applyBackupInDiff),
     vscode.window.tabGroups.onDidChangeTabs(syncBackupDiffContext),
     vscode.window.tabGroups.onDidChangeTabGroups(syncBackupDiffContext),
+    vscode.window.onDidChangeActiveTextEditor(syncBackupDiffContext),
     vscode.commands.registerCommand(
       'genkouSheet.moveFileUp',
       (item?: ManuscriptTreeItem) => {
@@ -502,6 +543,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.contentChanges.length > 0) scheduleBackup(e.document);
     }),
     vscode.workspace.onDidCloseTextDocument((doc) => {
+      if (doc.uri.scheme === BACKUP_SCHEME && doc.uri.path.startsWith('/current/')) {
+        currentTexts.delete(doc.uri.path.slice('/current/'.length));
+      }
       if (backupTimers.has(doc.uri.toString())) backupNow(doc);
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => {
