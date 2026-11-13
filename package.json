@@ -2,7 +2,7 @@
   "name": "genkou-sheet",
   "displayName": "Genkou Sheet - 原稿用紙エディタ",
   "description": "原稿用紙のマス目（緑・赤罫線、縦書き・横書き）に直接タイピングできる小説・文章執筆用VS Code拡張機能。対象フォルダー限定動作、ルビ・禁則処理、文字数・枚数カウント、原稿ツリー管理に対応。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "moha358",
   "license": "MIT",
   "repository": {
