@@ -67,13 +67,15 @@ genkou_sheet/
 │   │   ├── parser.ts                # 青空文庫ルビ・傍点・会話文パーサー
 │   │   ├── layoutEngine.ts          # マス目割り付け・禁則処理・枚数計算エンジン
 │   │   ├── counter.ts               # 文字数・原稿用紙換算カウントロジック
-│   │   └── theme.ts                 # グローバルテーマ定義（Design Tokens）
+│   │   ├── textDiff.ts              # Webview 編集の最小置換範囲計算
+│   │   └── theme.ts                 # グローバルテーマ定義（Design Tokens）・設定値の正規化
 │   ├── providers/                   # VS Code API 連携層
 │   │   ├── genkouEditorProvider.ts  # CustomTextEditorProvider 実装
 │   │   ├── manuscriptTreeProvider.ts# 原稿ツリー TreeDataProvider 実装
 │   │   └── statusBarProvider.ts     # StatusBarItem 制御
 │   ├── services/                    # ワークスペース操作・出力サービス
 │   │   ├── workspaceService.ts      # 対象フォルダー初期化・解除 (.genkou.json)
+│   │   ├── backupService.ts         # 原稿の自動バックアップ（世代管理）
 │   │   └── exportService.ts         # HTML / PDF 組版出力サービス
 │   └── webview/                     # Webview フロントエンド実装
 │       ├── index.ts                 # Webview エントリ
@@ -131,9 +133,25 @@ genkou_sheet/
 * `UPDATE_CONFIG`: `{ type: 'UPDATE_CONFIG', partialConfig: Partial<GenkouConfig> }`
 * `REQUEST_EXPORT`: `{ type: 'REQUEST_EXPORT', format: 'html' | 'combined' }`
 
+### 通信上の規約
+* Webview 側の `text` は常に改行コード LF で扱う。CRLF の文書では Host が送信時に LF へ、受信時に CRLF へ変換する。
+* Host は `EDIT_TEXT` の全文と現在の文書を比較し（`core/textDiff.ts`）、変更範囲だけを `WorkspaceEdit` で置換する。
+* `UPDATE_CONFIG` は Webview が変更可能なキー（書字方向・罫線色・字数・行数・字下げ・会話文強調）だけを `sanitizeGenkouConfig` で正規化して保存する。フォルダー未オープン時はユーザー設定に保存する。
+* ワークスペース設定値は信頼できない入力として扱い、Host・出力 HTML とも `sanitizeGenkouConfig` を通してから使う。
+
 ---
 
-## 5. グローバルテーマ設計 (Global Theme Management)
+## 5. 自動バックアップ
+
+* 対象: 原稿用紙エディタで開いた `file:` スキームの `.txt` / `.md`、および有効化済みフォルダー内の `.txt` / `.md`。
+* 保存先: `ExtensionContext.globalStorageUri/backups/<URIのSHA-256先頭32桁>/`。プロジェクトフォルダーにはファイルを作らない。
+* タイミング: 最後の変更から 1.5 秒後、保存時、文書を閉じた時、拡張機能の終了時。直前の世代と同じ内容は書き込まない。
+* 世代: 最新世代の作成から `genkouSheet.backup.intervalMinutes`（既定 5 分）以内の変更は最新世代を上書きし、それを過ぎたら新しい世代を作る。`genkouSheet.backup.maxSnapshots`（既定 50）を超えた古い世代は削除する。書き込みは一時ファイルからの rename で行う。
+* 復元: `genkouSheet.restoreBackup` で世代を選び、読み取り専用の差分表示（`genkou-backup:` スキーム）・Undo 可能な置換（置換前の内容を新しい世代として退避）・新規タブへの展開を選べる。
+
+---
+
+## 6. グローバルテーマ設計 (Global Theme Management)
 
 コンポーネント内でのスタイル直書き（ハードコード）を禁止し、`src/core/theme.ts` および `globalTheme.css` の CSS カスタムプロパティ（Design Tokens）で一元管理する。
 
