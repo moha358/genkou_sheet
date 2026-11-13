@@ -1,0 +1,424 @@
+/**
+ * Global Theme Stylesheet (一元管理スタイルシート)
+ * すべての色・フォント・サイズ・余白・角丸・影は src/core/theme.ts から注入される
+ * CSS Variables (--genkou-*) を参照し、コンポーネント内のハードコードを排除する。
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background-color: var(--genkou-canvas-bg);
+  color: var(--genkou-text-main);
+  font-family: var(--genkou-font-family);
+  overflow: hidden;
+  user-select: none;
+}
+
+.genkou-app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+}
+
+/* ツールバー */
+.genkou-toolbar {
+  min-height: var(--genkou-toolbar-height);
+  background-color: var(--genkou-toolbar-bg);
+  border-bottom: var(--genkou-inner-border-width) solid var(--genkou-toolbar-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: var(--genkou-spacing-xs) var(--genkou-spacing-md);
+  font-family: var(--genkou-ui-font-family);
+  font-size: var(--genkou-toolbar-font-size);
+  gap: var(--genkou-spacing-sm);
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.genkou-toolbar-left,
+.genkou-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--genkou-spacing-sm);
+  flex-wrap: wrap;
+}
+
+.genkou-stats-badge {
+  color: var(--genkou-text-main);
+  font-weight: var(--genkou-font-weight-bold);
+  padding: var(--genkou-spacing-xs) var(--genkou-spacing-sm);
+  border-radius: var(--genkou-border-radius-sm);
+  background-color: var(--genkou-active-cell-bg);
+  border: var(--genkou-inner-border-width) solid var(--genkou-toolbar-border);
+  white-space: nowrap;
+}
+
+.genkou-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--genkou-spacing-xs);
+  color: var(--genkou-text-muted);
+}
+
+.genkou-select,
+.genkou-btn {
+  font-family: var(--genkou-ui-font-family);
+  font-size: var(--genkou-toolbar-font-size);
+  color: var(--genkou-text-main);
+  background-color: var(--genkou-paper-bg);
+  border: var(--genkou-inner-border-width) solid var(--genkou-toolbar-border);
+  border-radius: var(--genkou-border-radius-sm);
+  padding: var(--genkou-spacing-xs) var(--genkou-spacing-sm);
+  cursor: pointer;
+}
+
+.genkou-btn:hover,
+.genkou-select:hover {
+  border-color: var(--genkou-grid-primary);
+}
+
+.genkou-btn-primary {
+  background-color: var(--genkou-accent-color);
+  color: var(--genkou-paper-bg);
+  border-color: var(--genkou-accent-color);
+}
+
+/* 原稿用紙スクロールビューポート */
+.genkou-viewport {
+  flex: 1;
+  overflow: auto;
+  padding: var(--genkou-spacing-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--genkou-page-gap);
+  position: relative;
+}
+
+/* 原稿用紙1枚（400字詰めシート） */
+.genkou-sheet-page {
+  background-color: var(--genkou-paper-bg);
+  padding: var(--genkou-page-padding);
+  box-shadow: var(--genkou-page-shadow);
+  border-radius: var(--genkou-border-radius-sm);
+  position: relative;
+  flex-shrink: 0;
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.genkou-sheet-frame {
+  border: var(--genkou-outer-border-width) solid var(--genkou-grid-primary);
+  display: flex;
+  background-color: var(--genkou-paper-bg);
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-sheet-frame {
+  flex-direction: row-reverse;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-sheet-frame {
+  flex-direction: column;
+}
+
+.genkou-half {
+  display: flex;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-half {
+  flex-direction: row-reverse;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-half {
+  flex-direction: column;
+}
+
+/* 各行とルビ用余白列 */
+.genkou-line {
+  display: flex;
+  position: relative;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-line {
+  flex-direction: column;
+  margin-left: var(--genkou-ruby-gap);
+  border-left: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  border-right: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-line {
+  flex-direction: row;
+  margin-top: var(--genkou-ruby-gap);
+  border-top: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  border-bottom: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+}
+
+/* 1マス（セル） */
+.genkou-cell {
+  width: var(--genkou-cell-size);
+  height: var(--genkou-cell-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  font-size: var(--genkou-cell-font-size);
+  cursor: text;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-cell {
+  border-bottom: var(--genkou-inner-border-width) solid var(--genkou-grid-sub);
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-cell:last-child {
+  border-bottom: none;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-cell {
+  border-right: var(--genkou-inner-border-width) solid var(--genkou-grid-sub);
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-cell:last-child {
+  border-right: none;
+}
+
+.genkou-cell:hover {
+  background-color: var(--genkou-active-cell-bg);
+}
+
+.genkou-cell.is-selected {
+  background-color: var(--genkou-cursor-bg);
+  outline: var(--genkou-inner-border-width) dashed var(--genkou-cursor-border);
+  outline-offset: -1px;
+  z-index: 1;
+}
+
+.genkou-cell.is-cursor {
+  background-color: var(--genkou-cursor-bg);
+  outline: var(--genkou-outer-border-width) solid var(--genkou-cursor-border);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+.genkou-cell.is-ruby-group {
+  background-color: var(--genkou-active-cell-bg);
+}
+
+.genkou-char {
+  line-height: 1;
+  pointer-events: none;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-char {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+}
+
+.genkou-cell.is-dialogue .genkou-char {
+  color: var(--genkou-text-dialogue);
+}
+
+/* ルビ・傍点描画（ルビ欄） */
+.genkou-ruby,
+.genkou-bouten {
+  position: absolute;
+  font-size: var(--genkou-ruby-font-size);
+  color: var(--genkou-text-ruby);
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-ruby,
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-bouten {
+  right: calc(-1 * var(--genkou-ruby-gap) - 1px);
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-ruby,
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-bouten {
+  top: calc(-1 * var(--genkou-ruby-gap) - 1px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* 20マス目の句読点・閉じ括弧ぶら下げ */
+.genkou-hanging {
+  position: absolute;
+  font-size: var(--genkou-hanging-font-size);
+  color: var(--genkou-text-main);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-hanging {
+  right: 1px;
+  bottom: -9px;
+  writing-mode: vertical-rl;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-hanging {
+  right: -9px;
+  bottom: 1px;
+}
+
+/* 中央の柱（はしら）と魚尾（ぎょび） */
+.genkou-hashira {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--genkou-grid-primary);
+  font-size: var(--genkou-toolbar-font-size);
+  padding: var(--genkou-spacing-sm) 0;
+  user-select: none;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-hashira {
+  width: var(--genkou-hashira-width);
+  flex-direction: column;
+  writing-mode: horizontal-tb;
+  border-left: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  border-right: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  margin-left: var(--genkou-ruby-gap);
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-hashira > * {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.genkou-sheet-page[data-mode="vertical-rl"] .genkou-hashira-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 45%;
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-hashira {
+  height: var(--genkou-hashira-width);
+  flex-direction: row;
+  padding: 0 var(--genkou-spacing-sm);
+  border-top: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  border-bottom: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  margin-top: var(--genkou-ruby-gap);
+}
+
+.genkou-sheet-page[data-mode="horizontal-tb"] .genkou-hashira > * {
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.genkou-gyobi {
+  font-weight: var(--genkou-font-weight-bold);
+  color: var(--genkou-grid-primary);
+}
+
+/* フローティング直接入力・IME変換レイヤー */
+.genkou-ime-input {
+  position: fixed;
+  width: var(--genkou-cell-size);
+  height: var(--genkou-cell-size);
+  opacity: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  z-index: 10;
+  font-family: var(--genkou-font-family);
+  font-size: var(--genkou-cell-font-size);
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+}
+
+.genkou-ime-input.is-composing {
+  opacity: 1;
+  width: auto;
+  min-width: var(--genkou-cell-size);
+  height: auto;
+  min-height: var(--genkou-cell-size);
+  padding: var(--genkou-spacing-xs);
+  background-color: var(--genkou-paper-bg);
+  color: var(--genkou-text-main);
+  border: var(--genkou-outer-border-width) solid var(--genkou-cursor-border);
+  border-radius: var(--genkou-border-radius-sm);
+  box-shadow: var(--genkou-modal-shadow);
+  z-index: 30;
+}
+
+/* ルビ・傍点編集モーダル */
+.genkou-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.genkou-modal-backdrop.is-hidden {
+  display: none;
+}
+
+.genkou-modal {
+  background-color: var(--genkou-paper-bg);
+  color: var(--genkou-text-main);
+  border: var(--genkou-inner-border-width) solid var(--genkou-grid-primary);
+  border-radius: var(--genkou-border-radius-md);
+  box-shadow: var(--genkou-modal-shadow);
+  padding: var(--genkou-spacing-lg);
+  width: 340px;
+  font-family: var(--genkou-ui-font-family);
+  display: flex;
+  flex-direction: column;
+  gap: var(--genkou-spacing-md);
+}
+
+.genkou-modal-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: var(--genkou-font-weight-bold);
+  color: var(--genkou-text-main);
+}
+
+.genkou-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--genkou-spacing-xs);
+  font-size: var(--genkou-toolbar-font-size);
+}
+
+.genkou-form-input {
+  padding: var(--genkou-spacing-sm);
+  font-size: 14px;
+  font-family: var(--genkou-font-family);
+  color: var(--genkou-text-main);
+  background-color: var(--genkou-canvas-bg);
+  border: var(--genkou-inner-border-width) solid var(--genkou-toolbar-border);
+  border-radius: var(--genkou-border-radius-sm);
+}
+
+.genkou-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--genkou-spacing-sm);
+}
