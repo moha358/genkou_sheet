@@ -5,50 +5,52 @@
 import * as crypto from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { computeMinimalEdit } from '../core/textDiff';
 import {
-  DEFAULT_GENKOU_CONFIG,
   GenkouConfig,
-  GridColorTheme,
   HostToWebviewMessage,
+  sanitizeGenkouConfig,
   WebviewToHostMessage,
-  WritingMode,
 } from '../core/theme';
 import { EDITOR_VIEW_TYPE } from '../services/workspaceService';
 
 export function readGenkouConfigFromVscode(): GenkouConfig {
   const cfg = vscode.workspace.getConfiguration('genkouSheet');
-  return {
-    enabled: cfg.get<boolean>('enabled', DEFAULT_GENKOU_CONFIG.enabled),
-    writingMode: cfg.get<WritingMode>(
-      'writingMode',
-      DEFAULT_GENKOU_CONFIG.writingMode
-    ),
-    gridColor: cfg.get<GridColorTheme>(
-      'gridColor',
-      DEFAULT_GENKOU_CONFIG.gridColor
-    ),
-    charsPerLine: cfg.get<number>(
-      'charsPerLine',
-      DEFAULT_GENKOU_CONFIG.charsPerLine
-    ),
-    linesPerPage: cfg.get<number>(
-      'linesPerPage',
-      DEFAULT_GENKOU_CONFIG.linesPerPage
-    ),
-    autoIndent: cfg.get<boolean>(
-      'autoIndent',
-      DEFAULT_GENKOU_CONFIG.autoIndent
-    ),
-    highlightDialogue: cfg.get<boolean>(
-      'highlightDialogue',
-      DEFAULT_GENKOU_CONFIG.highlightDialogue
-    ),
-  };
+  // 設定値はワークスペースの settings.json から任意の値を書き込めるため、必ず正規化してから使う
+  return sanitizeGenkouConfig({
+    enabled: cfg.get('enabled'),
+    writingMode: cfg.get('writingMode'),
+    gridColor: cfg.get('gridColor'),
+    charsPerLine: cfg.get('charsPerLine'),
+    linesPerPage: cfg.get('linesPerPage'),
+    autoIndent: cfg.get('autoIndent'),
+    highlightDialogue: cfg.get('highlightDialogue'),
+  });
+}
+
+const WEBVIEW_CONFIG_KEYS: ReadonlyArray<keyof GenkouConfig> = [
+  'writingMode',
+  'gridColor',
+  'charsPerLine',
+  'linesPerPage',
+  'autoIndent',
+  'highlightDialogue',
+];
+
+/** Webview 側は常に LF で扱い、CRLF 文書との間で改行コードを相互変換する */
+function toWebviewText(document: vscode.TextDocument): string {
+  const text = document.getText();
+  return document.eol === vscode.EndOfLine.CRLF ? text.replace(/\r\n/g, '\n') : text;
+}
+
+function fromWebviewText(document: vscode.TextDocument, text: string): string {
+  return document.eol === vscode.EndOfLine.CRLF ? text.replace(/\r?\n/g, '\r\n') : text;
 }
 
 export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
   public static readonly viewType = EDITOR_VIEW_TYPE;
   private activeDocument: vscode.TextDocument | undefined;
+  private readonly openDocuments = new Map<string, number>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -59,8 +61,14 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
     ) => void
   ) {}
 
+  /** 現在フォーカスされている原稿用紙エディタの文書（無ければ undefined） */
   public getActiveDocument(): vscode.TextDocument | undefined {
     return this.activeDocument;
+  }
+
+  /** 原稿用紙エディタで開かれている文書か */
+  public isOpenInGenkou(document: vscode.TextDocument): boolean {
+    return this.openDocuments.has(document.uri.toString());
   }
 
   public async resolveCustomTextEditor(
@@ -68,6 +76,8 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
+    const docKey = document.uri.toString();
+    this.openDocuments.set(docKey, (this.openDocuments.get(docKey) ?? 0) + 1);
     this.activeDocument = document;
     this.onDocumentUpdated(document);
 
@@ -93,7 +103,7 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
           case 'READY': {
             postToWebview({
               type: 'INIT_DOCUMENT',
-              text: document.getText(),
+              text: toWebviewText(document),
               config: readGenkouConfigFromVscode(),
               version: document.version,
               fileName: path.basename(document.fileName),
@@ -102,18 +112,24 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'EDIT_TEXT': {
             let accepted = msg.version === document.version;
-            if (accepted && msg.text !== document.getText()) {
-              applyingWebviewText = msg.text;
+            const nextText = fromWebviewText(document, msg.text);
+            const current = document.getText();
+            const diff = accepted ? computeMinimalEdit(current, nextText) : null;
+            if (diff) {
+              applyingWebviewText = nextText;
               try {
                 const edit = new vscode.WorkspaceEdit();
-                edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), msg.text);
+                edit.replace(
+                  document.uri,
+                  new vscode.Range(document.positionAt(diff.start), document.positionAt(diff.end)),
+                  diff.text
+                );
                 accepted = await vscode.workspace.applyEdit(edit);
-                this.onDocumentUpdated(document);
               } finally {
                 applyingWebviewText = undefined;
               }
             }
-            postToWebview({ type: 'EDIT_RESULT', accepted, text: document.getText(), version: document.version });
+            postToWebview({ type: 'EDIT_RESULT', accepted, text: toWebviewText(document), version: document.version });
             break;
           }
           case 'PRESERVE_CONFLICT': {
@@ -124,18 +140,18 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'UPDATE_CONFIG': {
             const cfg = vscode.workspace.getConfiguration('genkouSheet');
-            const entries = Object.entries(msg.partialConfig) as [
-              keyof GenkouConfig,
-              unknown,
-            ][];
-            for (const [key, val] of entries) {
-              if (val !== undefined) {
-                await cfg.update(
-                  key,
-                  val,
-                  vscode.ConfigurationTarget.Workspace
-                );
+            const target = vscode.workspace.workspaceFolders?.length
+              ? vscode.ConfigurationTarget.Workspace
+              : vscode.ConfigurationTarget.Global;
+            const merged = sanitizeGenkouConfig({ ...readGenkouConfigFromVscode(), ...msg.partialConfig });
+            try {
+              for (const key of WEBVIEW_CONFIG_KEYS) {
+                if (msg.partialConfig[key] !== undefined) {
+                  await cfg.update(key, merged[key], target);
+                }
               }
+            } catch (err) {
+              void vscode.window.showErrorMessage(`原稿用紙の設定を保存できませんでした: ${err instanceof Error ? err.message : String(err)}`);
             }
             break;
           }
@@ -156,7 +172,7 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
         if (document.getText() !== applyingWebviewText && e.contentChanges.length > 0) {
           postToWebview({
             type: 'DOCUMENT_CHANGED',
-            text: document.getText(),
+            text: toWebviewText(document),
             version: document.version,
           });
         }
@@ -178,10 +194,18 @@ export class GenkouEditorProvider implements vscode.CustomTextEditorProvider {
       if (webviewPanel.active) {
         this.activeDocument = document;
         this.onDocumentUpdated(document);
+      } else if (this.activeDocument === document) {
+        this.activeDocument = undefined;
       }
     });
 
     webviewPanel.onDidDispose(() => {
+      if (this.activeDocument === document) {
+        this.activeDocument = undefined;
+      }
+      const remaining = (this.openDocuments.get(docKey) ?? 1) - 1;
+      if (remaining > 0) this.openDocuments.set(docKey, remaining);
+      else this.openDocuments.delete(docKey);
       msgSubscription.dispose();
       changeDocSubscription.dispose();
       changeConfigSubscription.dispose();
